@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Flashii Chat - File Upload Progress Bar
 // @namespace    https://patchii.net/lester/flashii-chat-userscripts
-// @version      1.2
+// @version      1.3
 // @description  Show prograss bar for file upload in chat.
 // @author       lester
 // @match        *://chat.flashii.net/*
@@ -35,7 +35,7 @@
     `;
 
     const label = document.createElement('span');
-    label.textContent = 'Uploading...';
+    label.textContent = 'Uploading File...';
     label.style.cssText = `
       color: var(--theme-colour-main-colour);
       font-size: 13px;
@@ -76,10 +76,12 @@
   function updateCombinedProgress() {
     let totalLoaded = 0;
     let totalSize = 0;
+    let allDone = true;
 
-    for (const { loaded, total } of uploads.values()) {
+    for (const { loaded, total, done } of uploads.values()) {
       totalLoaded += loaded;
       totalSize += total;
+      if (!done) allDone = false;
     }
 
     const percent = totalSize === 0 ? 0 : Math.round((totalLoaded / totalSize) * 100);
@@ -91,12 +93,13 @@
     inner.style.width = `${percent}%`;
     inner.textContent = `${percent}%`;
 
-    if (percent >= 100) {
+    if (allDone) {
       setTimeout(() => {
         wrapper.style.opacity = '0';
         setTimeout(() => {
           inner.style.width = '0%';
           inner.textContent = '';
+          uploads.clear();
         }, 150);
       }, 800);
     }
@@ -104,7 +107,6 @@
 
   function CustomXHR() {
     const xhr = new originalXHR();
-    let id = Math.random().toString(36).slice(2);
 
     xhr.open = function (method, url) {
       this._isUpload = method === 'POST' && url.includes('/uploads');
@@ -113,21 +115,30 @@
 
     xhr.send = function (body) {
       if (this._isUpload) {
+        const id = Math.random().toString(36).slice(2);
         createProgressBar();
-
-        uploads.set(id, { loaded: 0, total: 0 });
+        uploads.set(id, { loaded: 0, total: 0, done: false });
 
         this.upload.onprogress = e => {
-          if (!e.lengthComputable) return;
-          uploads.set(id, { loaded: e.loaded, total: e.total });
-          updateCombinedProgress();
+          if (e.lengthComputable) {
+            uploads.set(id, {
+              loaded: e.loaded,
+              total: e.total,
+              done: false
+            });
+            updateCombinedProgress();
+          }
         };
 
         this.addEventListener('loadend', () => {
-          uploads.delete(id);
-          updateCombinedProgress();
+          const current = uploads.get(id);
+          if (current) {
+            uploads.set(id, { ...current, done: true });
+            updateCombinedProgress();
+          }
         });
       }
+
       return originalXHR.prototype.send.apply(this, arguments);
     };
 
