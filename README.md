@@ -24,9 +24,7 @@ _Please have Greasemonkey/Tampermonkey installed first_
 
 ![Preview](docs/better-quotes-del.png)
 
-[![Download][1]][2]
-[1]:  docs/better-quotes-del-dl.png
-[2]:  https://patchii.net/lester/flashii-chat-userscripts/raw/branch/trunk/better-quotes-n-delete.user.js "Download"
+[![Download](docs/better-quotes-del-dl.png)](https://patchii.net/lester/flashii-chat-userscripts/raw/branch/trunk/better-quotes-n-delete.user.js "Download")
 
 ---
 
@@ -36,6 +34,4 @@ _Please have Greasemonkey/Tampermonkey installed first_
 
 ![Preview](docs/progress-bar.png)
 
-[![Download][3]][4]
-[3]:  docs/progress-bar-dl.png
-[4]:  https://patchii.net/lester/flashii-chat-userscripts/raw/branch/trunk/file-upload-progress-bar.user.js "Download"
+[![Download](docs/progress-bar-dl.png)](https://patchii.net/lester/flashii-chat-userscripts/raw/branch/trunk/file-upload-progress-bar.user.js "Download")
