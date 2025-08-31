@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Flashii Chat - Better Quotes & Delete Button
 // @namespace    https://patchii.net/lester/flashii-chat-userscripts
-// @version      4.0
+// @version      4.1
 // @description  Adds message quoting and preview, via button and timestamp. Adds delete button to own messages.
 // @author       lester
 // @match        *://chat.flashii.net/*
@@ -21,7 +21,8 @@
   let selectedText = '';
   let pendingQuote = null;
   let previewInterval = null;
-  const cssID = 'chat-enhanced-style';
+  const cssID = 'chat-style';
+  const processedMessages = new WeakSet();
 
   document.addEventListener('mouseup', () => {
     const sel = window.getSelection();
@@ -179,140 +180,160 @@
         if (menus && main) form.insertBefore(preview, main);
       }
       const span = preview.querySelector('span');
+      const cleanMsg = msg.replace(/\[Embed\]|\[Remove\]/g, '').replace(/\[color=var\(--theme-colour-message-time-colour\)\][^\w\[\]]{1,3}\[\/color\]/g, '').trim();
       const updateTime = () => {
         const time = getRelativeTime(created);
-        span.innerHTML = `<i>Quoting <b style="color: ${color};">${name}</b> @ ${time} </i>— "${msg.slice(0, 100)}..."`;
+        span.innerHTML = `<i>Quoting <b style="color: ${color};">${name}</b> @ ${time} </i>— "${cleanMsg.slice(0, 100)}..."`;
       };
       updateTime();
       previewInterval = setInterval(updateTime, 1000);
     };
 
-    const addButtons = () => {
-      injectCSS();
-      const input = document.querySelector('textarea.input__text');
-      const form = document.querySelector('form.input');
+    const processMessage = (msg, input, uid) => {
+      if (processedMessages.has(msg)) return;
+      processedMessages.add(msg);
 
-      document.querySelectorAll('.message').forEach(msg => {
-        const id = msg.dataset.id;
-        const author = msg.dataset.author;
-        const body = msg.dataset.body || '';
-        if (!input || ['has disconnected', 'has joined'].some(p => body.includes(p))) return;
+      const id = msg.dataset.id;
+      const author = msg.dataset.author;
+      const body = msg.dataset.body || '';
+      if (!input || ['has disconnected', 'has joined'].some(p => body.includes(p))) return;
 
-        const textEl = msg.querySelector('.message__text') || msg.querySelector('.message-tiny-text');
-        const userEl = msg.querySelector('.message__user');
-        const timeEl = msg.querySelector('.message__time');
+      const textEl = msg.querySelector('.message__text') || msg.querySelector('.message-tiny-text');
+      const userEl = msg.querySelector('.message__user');
+      const timeEl = msg.querySelector('.message__time');
 
-        const dataCreated = msg.getAttribute('data-created');
-        const raw = userEl?.style?.color;
-        const userColor = (!raw || raw === 'inherit') ? null : rgbToHex(raw);
-        const name = userEl?.textContent?.trim() || 'Unknown';
-        let msgText = msg.dataset.body || textEl?.textContent.trim() || '';
+      const dataCreated = msg.getAttribute('data-created');
+      const raw = userEl?.style?.color;
+      const userColor = (!raw || raw === 'inherit') ? null : rgbToHex(raw);
+      const name = userEl?.textContent?.trim() || 'Unknown';
+      let msgText = msg.dataset.body || textEl?.textContent.trim() || '';
 
-        const endQuoteIdx = msgText.lastIndexOf('[/quote]');
-        if (endQuoteIdx !== -1) msgText = msgText.slice(endQuoteIdx + 8).trim();
-        msgText = msgText.replace(/\[Embed\]|\[Remove\]/g, '').trim();
+      const endQuoteIdx = msgText.lastIndexOf('[/quote]');
+      if (endQuoteIdx !== -1) msgText = msgText.slice(endQuoteIdx + 8).trim();
+      msgText = msgText.replace(/\[Embed\]|\[Remove\]/g, '').trim();
 
-        if (timeEl) {
-          timeEl.onclick = e => {
-            if (enableDelete && e.shiftKey && author === uid) {
-              Umi.Server.SendMessage(`/delete ${id}`);
-            } else {
-              pendingQuote = { name, color: userColor, created: dataCreated, id, msg: msgText };
-              showQuotePreview(pendingQuote);
-              input.focus();
-            }
-          };
-        }
-
-        const relTimeEl = textEl?.querySelector('i');
-        if (relTimeEl) {
-          relTimeEl.onclick = () => {
-            const anchor = textEl.querySelector('a[href^="#"]');
-            const idMatch = anchor?.getAttribute('href')?.match(/^#(\d{17})$/);
-            if (idMatch) {
-              const targetId = idMatch[1];
-              const target = document.getElementById(`message-${targetId}`);
-              if (target) {
-                target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                target.classList.add('highlight-temp');
-                setTimeout(() => target.classList.remove('highlight-temp'), 1500);
-              }
-            }
-          };
-        }
-
-        let btnContainer = msg.querySelector('.message-button-container');
-        if (!btnContainer) {
-          btnContainer = document.createElement('div');
-          btnContainer.className = 'message-button-container';
-          msg.style.position = 'relative';
-          msg.appendChild(btnContainer);
-        }
-
-        if (enableDelete && showButtons && !msg.querySelector('.delete-button') && author === uid) {
-          const del = document.createElement('button');
-          del.className = 'delete-button';
-          del.innerHTML = '&times;';
-          del.title = 'Delete this message';
-          del.onclick = () => Umi.Server.SendMessage(`/delete ${id}`);
-          btnContainer.appendChild(del);
-        }
-
-        if (showButtons && !msg.querySelector('.quote-button') && textEl && userEl && timeEl) {
-          const btn = document.createElement('button');
-          btn.className = 'quote-button';
-          btn.textContent = 'Quote';
-          btn.title = 'Quote this message';
-          btn.onclick = () => {
+      if (timeEl) {
+        timeEl.onclick = e => {
+          if (enableDelete && e.shiftKey && author === uid) {
+            Umi.Server.SendMessage(`/delete ${id}`);
+          } else {
             pendingQuote = { name, color: userColor, created: dataCreated, id, msg: msgText };
             showQuotePreview(pendingQuote);
             input.focus();
-          };
-          btnContainer.appendChild(btn);
-        }
+          }
+        };
+      }
 
-        if (showButtons && !msg.querySelector('.goto-button') && textEl?.querySelector('a[href^="#"]')) {
+      const relTimeEl = textEl?.querySelector('i');
+      if (relTimeEl) {
+        relTimeEl.onclick = () => {
           const anchor = textEl.querySelector('a[href^="#"]');
           const idMatch = anchor?.getAttribute('href')?.match(/^#(\d{17})$/);
           if (idMatch) {
             const targetId = idMatch[1];
-            const go = document.createElement('button');
-            go.className = 'goto-button';
-            go.textContent = 'Go to quoted';
-            go.title = 'Scroll to quoted message';
-            go.onclick = () => {
-              const target = document.getElementById(`message-${targetId}`);
-              if (target) {
-                target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                target.classList.add('highlight-temp');
-                setTimeout(() => target.classList.remove('highlight-temp'), 1500);
-              }
-            };
-            btnContainer.appendChild(go);
+            const target = document.getElementById(`message-${targetId}`);
+            if (target) {
+              target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              target.classList.add('highlight-temp');
+              setTimeout(() => target.classList.remove('highlight-temp'), 1500);
+            }
           }
-        }
-      });
+        };
+      }
 
-      if (form && !form.__quoteIntercepted) {
-        form.__quoteIntercepted = true;
-        form.addEventListener('submit', e => {
-          if (pendingQuote && input) {
-            const { name, color, id, msg, created } = pendingQuote;
-            const hidden = '\u200C';
-            const cleanMsg = msg.replace(/\[Embed\]|\[Remove\]/g, '').trim();
-            const time = getRelativeTime(created);
-            const quoteBlock = `[i]${color ? `[color=${color}]` : ''}[b]${name}[/b]${color ? '[/color]' : ''} [color=var(--theme-colour-message-time-colour)]@ ${time} —[/color][/i][url=#${id}]${hidden}[/url] [quote]${cleanMsg}[/quote]`;
-            input.value = `${quoteBlock}${input.value ? `\n[color=var(--theme-colour-message-time-colour)]└─[/color] ` + input.value.trimStart() : ''}`;
-            pendingQuote = null;
-            const preview = document.getElementById('quote-preview');
-            if (preview) preview.remove();
-            clearInterval(previewInterval);
-          }
-        }, true);
+      let btnContainer = msg.querySelector('.message-button-container');
+      if (!btnContainer) {
+        btnContainer = document.createElement('div');
+        btnContainer.className = 'message-button-container';
+        msg.style.position = 'relative';
+        msg.appendChild(btnContainer);
+      }
+
+      if (enableDelete && showButtons && !msg.querySelector('.delete-button') && author === uid) {
+        const del = document.createElement('button');
+        del.className = 'delete-button';
+        del.innerHTML = '&times;';
+        del.title = 'Delete this message';
+        del.onclick = () => Umi.Server.SendMessage(`/delete ${id}`);
+        btnContainer.appendChild(del);
+      }
+
+      if (showButtons && !msg.querySelector('.quote-button') && textEl && userEl && timeEl) {
+        const btn = document.createElement('button');
+        btn.className = 'quote-button';
+        btn.textContent = 'Quote';
+        btn.title = 'Quote this message';
+        btn.onclick = () => {
+          pendingQuote = { name, color: userColor, created: dataCreated, id, msg: msgText };
+          showQuotePreview(pendingQuote);
+          input.focus();
+        };
+        btnContainer.appendChild(btn);
+      }
+
+      if (showButtons && !msg.querySelector('.goto-button') && textEl?.querySelector('a[href^="#"]')) {
+        const anchor = textEl.querySelector('a[href^="#"]');
+        const idMatch = anchor?.getAttribute('href')?.match(/^#(\d{17})$/);
+        if (idMatch) {
+          const targetId = idMatch[1];
+          const go = document.createElement('button');
+          go.className = 'goto-button';
+          go.textContent = 'Go to quoted';
+          go.title = 'Scroll to quoted message';
+          go.onclick = () => {
+            const target = document.getElementById(`message-${targetId}`);
+            if (target) {
+              target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              target.classList.add('highlight-temp');
+              setTimeout(() => target.classList.remove('highlight-temp'), 1500);
+            }
+          };
+          btnContainer.appendChild(go);
+        }
       }
     };
 
-    addButtons();
-    new MutationObserver(addButtons).observe(document.body, { childList: true, subtree: true });
+    const processNewMessages = () => {
+      const input = document.querySelector('textarea.input__text');
+      const container = document.getElementById('umi-messages');
+      const children = [...container.children];
+      for (let i = children.length - 1; i >= 0; i--) {
+        const msg = children[i];
+        if (msg.classList.contains('message')) {
+          if (processedMessages.has(msg)) break;
+          processMessage(msg, input, uid);
+        }
+      }
+    };
+
+    injectCSS();
+    processNewMessages();
+
+    new MutationObserver(processNewMessages).observe(document.getElementById('umi-messages'), { childList: true });
+
+    const form = document.querySelector('form.input');
+    const input = document.querySelector('textarea.input__text');
+
+    if (form && input && !form.__quoteIntercepted) {
+      form.__quoteIntercepted = true;
+      form.addEventListener('submit', e => {
+        if (pendingQuote) {
+          const { name, color, id, msg, created } = pendingQuote;
+          const hidden = '\u200C';
+          const cleanMsg = msg.replace(/\[Embed\]|\[Remove\]/g, '').replace(/\[color=var\(--theme-colour-message-time-colour\)\][^\w\[\]]{1,3}\[\/color\]/g, '').trim();
+          const time = getRelativeTime(created);
+          const quoteBlock = `[i]${color ? `[color=${color}]` : ''}[b]${name}[/b]${color ? '[/color]' : ''} [color=var(--theme-colour-message-time-colour)]@ ${time} —[/color][/i][url=#${id}]${hidden}[/url] [quote]${cleanMsg}[/quote]`;
+
+          const full = `${quoteBlock}${input.value ? `\n[color=var(--theme-colour-message-time-colour)]└─[/color] ` + input.value.trimStart() : ''}`;
+          input.value = full;
+          pendingQuote = null;
+
+          const preview = document.getElementById('quote-preview');
+          if (preview) preview.remove();
+          clearInterval(previewInterval);
+        }
+      }, true);
+    }
+
   });
 })();
