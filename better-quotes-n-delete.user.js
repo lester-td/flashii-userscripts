@@ -504,6 +504,7 @@
             const preview = document.getElementById("quote-preview");
             if (preview) preview.remove();
             clearInterval(previewInterval);
+            clearSelectedMessage();
           }
         },
         true,
