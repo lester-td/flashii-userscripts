@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Flashii Chat - Better Quotes & Delete Button
 // @namespace    https://patchii.net/lester/flashii-chat-userscripts
-// @version      4.1
+// @version      4.2
 // @description  Adds message quoting and preview, via button and timestamp. Adds delete button to own messages.
 // @author       lester
 // @match        *://chat.flashii.net/*
@@ -23,6 +23,46 @@
   let previewInterval = null;
   const cssID = 'chat-style';
   const processedMessages = new WeakSet();
+
+  function smartSlice(text, limit = 100, edge = 50, spill = 10) {
+    const isWhiteSpace = char => /\s/.test(char || '');
+
+    const n = text.length;
+    if (n <= limit) return text;
+    if (n <= limit + spill) {
+      if (!isWhiteSpace(text[limit]) && !isWhiteSpace(text[limit - 1])) return text;
+    }
+    let startEnd = Math.min(edge, n);
+
+    if (!isWhiteSpace(text[startEnd]) && !isWhiteSpace(text[startEnd - 1])) {
+      const before = text.lastIndexOf(' ', startEnd);
+      const after  = text.indexOf(' ', startEnd);
+      if (before !== -1 && (after === -1 || (startEnd - before) <= (after - startEnd))) {
+        startEnd = before;
+      } else if (after !== -1) {
+        startEnd = after;
+      }
+    }
+
+    if (startEnd <= 0) startEnd = Math.min(edge, n);
+    const start = text.slice(0, startEnd).trimEnd();
+
+    let endStart = Math.max(n - edge, 0);
+    if (!isWhiteSpace(text[endStart]) && !isWhiteSpace(text[endStart - 1])) {
+      const after  = text.indexOf(' ', endStart);
+      const before = text.lastIndexOf(' ', endStart);
+      if (after !== -1) {
+        endStart = after + 1;
+      } else if (before !== -1) {
+        endStart = before + 1;
+      } else {
+        endStart = Math.max(n - edge, 0);
+      }
+    }
+    const end = text.slice(endStart).trimStart();
+
+    return `${start} ... ${end}`;
+  }
 
   document.addEventListener('mouseup', () => {
     const sel = window.getSelection();
@@ -183,7 +223,8 @@
       const cleanMsg = msg.replace(/\[Embed\]|\[Remove\]/g, '').replace(/\[color=var\(--theme-colour-message-time-colour\)\][^\w\[\]]{1,3}\[\/color\]/g, '').trim();
       const updateTime = () => {
         const time = getRelativeTime(created);
-        span.innerHTML = `<i>Quoting <b style="color: ${color};">${name}</b> @ ${time} </i>— "${cleanMsg.slice(0, 100)}..."`;
+        const displayText = smartSlice(cleanMsg, 100, 50, 10);
+        span.innerHTML = `<i>Quoting <b style="color: ${color};">${name}</b> @ ${time} </i>— "${displayText}"`;
       };
       updateTime();
       previewInterval = setInterval(updateTime, 1000);
@@ -322,12 +363,11 @@
           const hidden = '\u200C';
           const cleanMsg = msg.replace(/\[Embed\]|\[Remove\]/g, '').replace(/\[color=var\(--theme-colour-message-time-colour\)\][^\w\[\]]{1,3}\[\/color\]/g, '').trim();
           const time = getRelativeTime(created);
-          const quoteBlock = `[i]${color ? `[color=${color}]` : ''}[b]${name}[/b]${color ? '[/color]' : ''} [color=var(--theme-colour-message-time-colour)]@ ${time} —[/color][/i][url=#${id}]${hidden}[/url] [quote]${cleanMsg}[/quote]`;
-
+          const storedText = smartSlice(cleanMsg, 100, 50, 10);
+          const quoteBlock = `[i]${color ? `[color=${color}]` : ''}[b]${name}[/b]${color ? '[/color]' : ''} [color=var(--theme-colour-message-time-colour)]@ ${time} —[/color][/i][url=#${id}]${hidden}[/url] [quote]${storedText}[/quote]`;
           const full = `${quoteBlock}${input.value ? `\n[color=var(--theme-colour-message-time-colour)]└─[/color] ` + input.value.trimStart() : ''}`;
           input.value = full;
           pendingQuote = null;
-
           const preview = document.getElementById('quote-preview');
           if (preview) preview.remove();
           clearInterval(previewInterval);
