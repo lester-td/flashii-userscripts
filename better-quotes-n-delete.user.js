@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Flashii Chat - Better Quotes & Delete Button
 // @namespace    https://patchii.net/lester/flashii-chat-userscripts
-// @version      4.3
+// @version      4.3.1
 // @description  Adds message quoting and preview, via button and timestamp. Adds delete button to own messages.
 // @author       lester
 // @match        *://chat.flashii.net/*
@@ -181,15 +181,21 @@
           font-size: 13px;
           margin: 4px -1px;
           display: flex;
-          justify-content: space-between;
-          align-items: center;
+          align-items: flex-start;   /* align button to top */
+          max-width: 100%;           /* prevent overflow */
         }
+
         #quote-preview span {
-          white-space: nowrap;
+          flex: 1 1 auto;            /* text takes remaining space */
+          min-width: 0;              /* allow shrink for ellipsis */
           overflow: hidden;
           text-overflow: ellipsis;
+          white-space: normal;       /* wrapping allowed */
         }
+
         #cancel-quote {
+          flex: 0 0 auto;            /* button fixed size */
+          margin-left: 6px;
           background: none;
           border: none;
           color: var(--theme-colour-main-colour);
@@ -197,6 +203,7 @@
           font-weight: bold;
           padding: 0 6px;
           font-size: 13px;
+          align-self: flex-start;    /* stick to the top-right */
         }
         .highlight-temp {
           animation: blinkOutline 1s ease-in-out;
@@ -222,7 +229,7 @@
           position: absolute;
           inset: 0;
           opacity: 0.1;
-          background-color: blue;
+          background-color: color-mix(in srgb, var(--theme-colour-main-accent) 50%, black);
         }
       `;
       document.head.appendChild(style);
