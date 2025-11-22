@@ -3,6 +3,19 @@ _A collection of scripts to extend chat functionality. Please have Greasemonkey/
 
 ---
 
+## Ultreme Script
+- Combines the two scripts below
+- Adds settings page to the sidebar for easy toggling
+- Rendering of quotes as blocks
+
+![Preview](docs/settings-page.png)
+
+![Preview](docs/quote-blocks.png)
+
+[![Download](docs/ultreme-dl-75.png)](https://patchii.net/lester/flashii-chat-userscripts/raw/branch/trunk/ultreme-script.user.js "Download")
+
+---
+
 ## Better Quotes & Delete Button
 
 ### Delete Functionality
