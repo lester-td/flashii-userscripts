@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Flashii Chat - Ultreme Script
 // @namespace    https://patchii.net/lester/flashii-chat-userscripts
-// @version      5.0
+// @version      5.1
 // @description  Better quotes & delete button, quote blocks, upload progress bar, and Go to Forum button with settings.
 // @author       lester
 // @match        *://chat.flashii.net/*
@@ -11,7 +11,13 @@
 // ==/UserScript==
 
 (() => {
+  "use strict";
+
   const STORAGE_PREFIX = "ultreme_";
+  const cssID = "chat-style";
+  const ULTREME_MENU_ID = "ultreme";
+  const DEFAULT_NAME_COLOR = "#ffffff";
+  const DEFAULT_AVATAR_URL = "https://flashii.net/assets/avatar/";
 
   const loadBoolSetting = (key, def) => {
     try {
@@ -41,15 +47,29 @@
   let pendingQuote = null;
   let previewInterval = null;
   let selectedMessageIndex = -1;
-  const cssID = "chat-style";
+
   const processedMessages = new WeakSet();
   let mediaModal = null;
 
-  let userscriptPrevButton = null;
-  let userscriptPrevMenu = null;
-
   const NativeXHR = window.XMLHttpRequest;
   const uploads = new Map();
+
+  const getMessagesContainer = () => document.getElementById("umi-messages");
+
+  const getVisibleMessages = () => {
+    const container = getMessagesContainer();
+    if (!container) return [];
+    return [...container.children].filter((msg) => msg.classList.contains("message"));
+  };
+
+  const scrollToMessageId = (targetId) => {
+    if (!targetId) return;
+    const target = document.getElementById(`message-${targetId}`);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    target.classList.add("highlight-temp");
+    setTimeout(() => target.classList.remove("highlight-temp"), 1500);
+  };
 
   function createProgressBar() {
     if (document.getElementById("upload-progress-wrapper")) return;
@@ -106,7 +126,7 @@
 
     barContainer.appendChild(inner);
     wrapper.append(label, barContainer);
-    spoilerBtn.parentElement.appendChild(wrapper);
+    spoilerBtn.parentElement?.appendChild(wrapper);
   }
 
   function updateCombinedProgress() {
@@ -120,8 +140,7 @@
       if (!done) allDone = false;
     }
 
-    const percent =
-      totalSize === 0 ? 0 : Math.round((totalLoaded / totalSize) * 100);
+    const percent = totalSize === 0 ? 0 : Math.round((totalLoaded / totalSize) * 100);
     const wrapper = document.getElementById("upload-progress-wrapper");
     const inner = document.getElementById("upload-progress-inner");
     if (!wrapper || !inner) return;
@@ -146,11 +165,11 @@
     const xhr = new NativeXHR();
 
     xhr.open = function (method, url) {
-      this._isUpload = method === "POST" && url.includes("/uploads");
+      this._isUpload = method === "POST" && String(url || "").includes("/uploads");
       return NativeXHR.prototype.open.apply(this, arguments);
     };
 
-    xhr.send = function (body) {
+    xhr.send = function () {
       if (this._isUpload && enableUploadProgress) {
         const id = Math.random().toString(36).slice(2);
         createProgressBar();
@@ -158,11 +177,7 @@
 
         this.upload.onprogress = (e) => {
           if (e.lengthComputable) {
-            uploads.set(id, {
-              loaded: e.loaded,
-              total: e.total,
-              done: false,
-            });
+            uploads.set(id, { loaded: e.loaded, total: e.total, done: false });
             updateCombinedProgress();
           }
         };
@@ -188,65 +203,53 @@
   }
 
   function uninstallUploadProgress() {
-    if (window.XMLHttpRequest === UploadXHR) {
-      window.XMLHttpRequest = NativeXHR;
-    }
-    const wrapper = document.getElementById("upload-progress-wrapper");
-    if (wrapper) wrapper.remove();
+    if (window.XMLHttpRequest === UploadXHR) window.XMLHttpRequest = NativeXHR;
+    document.getElementById("upload-progress-wrapper")?.remove();
     uploads.clear();
   }
 
-  if (enableUploadProgress) {
-    installUploadProgress();
-  }
+  if (enableUploadProgress) installUploadProgress();
 
   function addForumButton() {
     if (!enableForumButton) return;
 
     const sidebarSelector = document.querySelector(".sidebar__selector");
-    const firstButton =
-      sidebarSelector?.querySelector(".sidebar__selector-mode");
+    const firstButton = sidebarSelector?.querySelector(".sidebar__selector-mode");
+    if (!sidebarSelector || !firstButton) return;
+    if (sidebarSelector.querySelector(".custom-button")) return;
 
-    if (
-      sidebarSelector &&
-      firstButton &&
-      !sidebarSelector.querySelector(".custom-button")
-    ) {
-      const newButton = document.createElement("button");
-      newButton.classList.add("sidebar__selector-mode", "custom-button");
-      newButton.title = "Go to Forum";
+    const newButton = document.createElement("button");
+    newButton.classList.add("sidebar__selector-mode", "custom-button");
+    newButton.title = "Go to Forum";
+    newButton.style.cssText = `
+      width: 40px;
+      height: 40px;
+      border: none;
+      background-color: transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    `;
 
-      newButton.style.width = "40px";
-      newButton.style.height = "40px";
-      newButton.style.border = "none";
-      newButton.style.backgroundColor = "transparent";
-      newButton.style.cursor = "pointer";
-      newButton.style.display = "flex";
-      newButton.style.alignItems = "center";
-      newButton.style.justifyContent = "center";
+    const favicon = document.querySelector('link[rel~="icon"]')?.href || "/favicon.ico";
+    const faviconImg = document.createElement("img");
+    faviconImg.src = favicon;
+    faviconImg.alt = "Flashii Forum";
+    faviconImg.style.width = "32px";
+    faviconImg.style.height = "32px";
+    newButton.appendChild(faviconImg);
 
-      const favicon =
-        document.querySelector('link[rel~="icon"]')?.href || "/favicon.ico";
-      const faviconImg = document.createElement("img");
-      faviconImg.src = favicon;
-      faviconImg.alt = "Flashii Forum";
-      faviconImg.style.width = "32px";
-      faviconImg.style.height = "32px";
+    newButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      window.open("https://flashii.net/forum", "_blank");
+    });
 
-      newButton.appendChild(faviconImg);
-
-      newButton.addEventListener("click", (event) => {
-        event.preventDefault();
-        window.open("https://flashii.net/forum", "_blank");
-      });
-
-      sidebarSelector.insertBefore(newButton, firstButton);
-    }
+    sidebarSelector.insertBefore(newButton, firstButton);
   }
 
   function removeForumButton() {
-    const btn = document.querySelector(".custom-button");
-    if (btn) btn.remove();
+    document.querySelector(".custom-button")?.remove();
   }
 
   function smartSlice(text, limit = 100, edge = 50, spill = 10) {
@@ -255,24 +258,16 @@
     const n = text.length;
     if (n <= limit) return text;
     if (n <= limit + spill) {
-      if (!isWhiteSpace(text[limit]) && !isWhiteSpace(text[limit - 1]))
-        return text;
+      if (!isWhiteSpace(text[limit]) && !isWhiteSpace(text[limit - 1])) return text;
     }
-    let startEnd = Math.min(edge, n);
 
+    let startEnd = Math.min(edge, n);
     if (!isWhiteSpace(text[startEnd]) && !isWhiteSpace(text[startEnd - 1])) {
       const before = text.lastIndexOf(" ", startEnd);
       const after = text.indexOf(" ", startEnd);
-      if (
-        before !== -1 &&
-        (after === -1 || startEnd - before <= after - startEnd)
-      ) {
-        startEnd = before;
-      } else if (after !== -1) {
-        startEnd = after;
-      }
+      if (before !== -1 && (after === -1 || startEnd - before <= after - startEnd)) startEnd = before;
+      else if (after !== -1) startEnd = after;
     }
-
     if (startEnd <= 0) startEnd = Math.min(edge, n);
     const start = text.slice(0, startEnd).trimEnd();
 
@@ -280,13 +275,9 @@
     if (!isWhiteSpace(text[endStart]) && !isWhiteSpace(text[endStart - 1])) {
       const after = text.indexOf(" ", endStart);
       const before = text.lastIndexOf(" ", endStart);
-      if (after !== -1) {
-        endStart = after + 1;
-      } else if (before !== -1) {
-        endStart = before + 1;
-      } else {
-        endStart = Math.max(n - edge, 0);
-      }
+      if (after !== -1) endStart = after + 1;
+      else if (before !== -1) endStart = before + 1;
+      else endStart = Math.max(n - edge, 0);
     }
     const end = text.slice(endStart).trimStart();
 
@@ -299,10 +290,7 @@
     if (endQuoteIdx !== -1) msgText = msgText.slice(endQuoteIdx + 8).trim();
     return msgText
       .replace(/\[Embed\]|\[Remove\]/g, "")
-      .replace(
-        /\[color=var\(--theme-colour-message-time-colour\)\][^\w\[\]]{1,3}\[\/color\]/g,
-        "",
-      )
+      .replace(/\[color=var\(--theme-colour-message-time-colour\)\][^\w\[\]]{1,3}\[\/color\]/g, "")
       .trim();
   }
 
@@ -371,18 +359,15 @@
   });
 
   document.addEventListener("click", (e) => {
-    if (
-      e.target.matches("button.markup__button") &&
-      e.target.textContent.trim().toLowerCase() === "quote"
-    ) {
+    const t = e.target;
+    if (!t || !(t instanceof Element)) return;
+
+    if (t.matches("button.markup__button") && t.textContent.trim().toLowerCase() === "quote") {
       setTimeout(() => {
         const input = document.querySelector("textarea.input__text");
         if (input && selectedText) {
           const quoted = `[quote]${selectedText}[/quote]`;
-          input.value =
-            input.value.trim() === "[quote][/quote]"
-              ? quoted
-              : input.value + quoted;
+          input.value = input.value.trim() === "[quote][/quote]" ? quoted : input.value + quoted;
           input.focus();
           selectedText = "";
         }
@@ -391,7 +376,9 @@
   });
 
   window.addEventListener("umi:connect", () => {
-    const uid = Umi.User.getCurrentUser().id;
+    const uid = window.Umi?.User?.getCurrentUser?.()?.id;
+    if (!uid) return;
+
     document.body.dataset.ultremeQuoteBlocks = enableQuoteBlocks ? "1" : "0";
 
     const rgbToHex = (rgb) => {
@@ -632,253 +619,9 @@
       document.head.appendChild(style);
     };
 
-    const setupUserscriptSettingsTab = () => {
-      const menusRoot = document.querySelector(".sidebar__menus");
-      const selector = document.querySelector(".sidebar__selector");
-      if (!menusRoot || !selector) return;
-      if (menusRoot.querySelector(".sidebar__menu--userscript")) return;
-
-      const userscriptMenu = document.createElement("div");
-      userscriptMenu.className = "sidebar__menu hidden";
-      userscriptMenu.innerHTML = `
-        <div class="sidebar__menu--settings sidebar__menu--userscript">
-          <div>
-            <div class="setting__category-title">Quoting</div>
-            <div class="setting__category">
-              <div class="setting__container setting__container--checkbox">
-                <label class="setting__label">
-                  <input type="checkbox" class="setting__input js-ultreme-showQuoteButton">
-                  <div>Show "Quote" button</div>
-                </label>
-              </div>
-              <div class="setting__container setting__container--checkbox">
-                <label class="setting__label">
-                  <input type="checkbox" class="setting__input js-ultreme-showGotoButton">
-                  <div>Show "Go to quote" button</div>
-                </label>
-              </div>
-              <div class="setting__container setting__container--checkbox">
-                <label class="setting__label">
-                  <input type="checkbox" class="setting__input js-ultreme-enableQuoteBlocks">
-                  <div>Render quotes as blocks</div>
-                </label>
-              </div>
-            </div>
-
-            <div class="setting__category-title">Deleting</div>
-            <div class="setting__category">
-              <div class="setting__hint">Hold shift and click your message's timestamp to delete</div>
-              <div class="setting__container setting__container--checkbox">
-                <label class="setting__label">
-                  <input type="checkbox" class="setting__input js-ultreme-enableDelete">
-                  <div>Enable Delete</div>
-                </label>
-              </div>
-              <div class="setting__container setting__container--checkbox">
-                <label class="setting__label">
-                  <input type="checkbox" class="setting__input js-ultreme-showDeleteButton">
-                  <div>Show Delete button</div>
-                </label>
-              </div>
-            </div>
-
-            <div class="setting__category-title">Misc.</div>
-            <div class="setting__category">
-              <div class="setting__container setting__container--checkbox">
-                <label class="setting__label">
-                  <input type="checkbox" class="setting__input js-ultreme-enableUploadProgress">
-                  <div>Show upload progress bar</div>
-                </label>
-              </div>
-              <div class="setting__container setting__container--checkbox">
-                <label class="setting__label">
-                  <input type="checkbox" class="setting__input js-ultreme-enableForumButton">
-                  <div>Show Flashii logo (Go to Forum) button</div>
-                </label>
-              </div>
-            </div>
-          </div>
-        </div>`;
-      menusRoot.appendChild(userscriptMenu);
-
-      const settingsBtn = [...selector.querySelectorAll(".sidebar__selector-mode")].find(
-        (b) => b.title === "Settings" || b.querySelector(".fa-cog"),
-      );
-
-      const userscriptBtn = document.createElement("button");
-      userscriptBtn.type = "button";
-      userscriptBtn.className = "sidebar__selector-mode";
-      userscriptBtn.title = "Ultreme Script Settings";
-      userscriptBtn.innerHTML =
-        '<i class="fas fa-code sidebar-gutter-font-icon"></i>';
-
-      if (settingsBtn && settingsBtn.nextSibling) {
-        settingsBtn.parentNode.insertBefore(userscriptBtn, settingsBtn.nextSibling);
-      } else {
-        selector.insertBefore(userscriptBtn, selector.firstChild);
-      }
-
-      const showQuoteButtonInput = userscriptMenu.querySelector(
-        ".js-ultreme-showQuoteButton",
-      );
-      const showGotoButtonInput = userscriptMenu.querySelector(
-        ".js-ultreme-showGotoButton",
-      );
-      const enableQuoteBlocksInput = userscriptMenu.querySelector(
-        ".js-ultreme-enableQuoteBlocks",
-      );
-      const enableDeleteInput = userscriptMenu.querySelector(
-        ".js-ultreme-enableDelete",
-      );
-      const showDeleteButtonInput = userscriptMenu.querySelector(
-        ".js-ultreme-showDeleteButton",
-      );
-      const enableUploadProgressInput = userscriptMenu.querySelector(
-        ".js-ultreme-enableUploadProgress",
-      );
-      const enableForumButtonInput = userscriptMenu.querySelector(
-        ".js-ultreme-enableForumButton",
-      );
-
-      if (showQuoteButtonInput) {
-        showQuoteButtonInput.checked = showQuoteButton;
-        showQuoteButtonInput.addEventListener("change", () => {
-          showQuoteButton = showQuoteButtonInput.checked;
-          saveBoolSetting("showQuoteButton", showQuoteButton);
-          document.querySelectorAll(".quote-button").forEach((btn) => {
-            btn.style.display = showQuoteButton ? "" : "none";
-          });
-        });
-      }
-
-      if (showGotoButtonInput) {
-        showGotoButtonInput.checked = showGotoButton;
-        showGotoButtonInput.addEventListener("change", () => {
-          showGotoButton = showGotoButtonInput.checked;
-          saveBoolSetting("showGotoButton", showGotoButton);
-          document.querySelectorAll(".goto-button").forEach((btn) => {
-            btn.style.display = showGotoButton ? "" : "none";
-          });
-        });
-      }
-
-      if (enableQuoteBlocksInput) {
-        enableQuoteBlocksInput.checked = enableQuoteBlocks;
-        enableQuoteBlocksInput.addEventListener("change", () => {
-          enableQuoteBlocks = enableQuoteBlocksInput.checked;
-          saveBoolSetting("enableQuoteBlocks", enableQuoteBlocks);
-          document.body.dataset.ultremeQuoteBlocks = enableQuoteBlocks ? "1" : "0";
-          if (enableQuoteBlocks) {
-            const msgs = document.querySelectorAll("#umi-messages .message");
-            msgs.forEach((msg) => {
-              const textEl =
-                msg.querySelector(".message__text") ||
-                msg.querySelector(".message-tiny-text");
-              if (textEl) enhanceScriptQuote(msg, textEl);
-            });
-          }
-        });
-      }
-
-      if (enableDeleteInput) {
-        enableDeleteInput.checked = enableDelete;
-        enableDeleteInput.addEventListener("change", () => {
-          enableDelete = enableDeleteInput.checked;
-          saveBoolSetting("enableDelete", enableDelete);
-          document.querySelectorAll(".delete-button").forEach((btn) => {
-            btn.style.display =
-              enableDelete && showDeleteButton ? "" : "none";
-          });
-        });
-      }
-
-      if (showDeleteButtonInput) {
-        showDeleteButtonInput.checked = showDeleteButton;
-        showDeleteButtonInput.addEventListener("change", () => {
-          showDeleteButton = showDeleteButtonInput.checked;
-          saveBoolSetting("showDeleteButton", showDeleteButton);
-          document.querySelectorAll(".delete-button").forEach((btn) => {
-            btn.style.display =
-              enableDelete && showDeleteButton ? "" : "none";
-          });
-        });
-      }
-
-      if (enableUploadProgressInput) {
-        enableUploadProgressInput.checked = enableUploadProgress;
-        enableUploadProgressInput.addEventListener("change", () => {
-          enableUploadProgress = enableUploadProgressInput.checked;
-          saveBoolSetting("enableUploadProgress", enableUploadProgress);
-          if (enableUploadProgress) {
-            installUploadProgress();
-          } else {
-            uninstallUploadProgress();
-          }
-        });
-      }
-
-      if (enableForumButtonInput) {
-        enableForumButtonInput.checked = enableForumButton;
-        enableForumButtonInput.addEventListener("change", () => {
-          enableForumButton = enableForumButtonInput.checked;
-          saveBoolSetting("enableForumButton", enableForumButton);
-          if (enableForumButton) {
-            addForumButton();
-          } else {
-            removeForumButton();
-          }
-        });
-      }
-
-      const menus = () => menusRoot.querySelectorAll(".sidebar__menu");
-      const buttons = () => selector.querySelectorAll(".sidebar__selector-mode");
-
-      userscriptBtn.addEventListener("click", () => {
-        const allMenus = menus();
-        const allButtons = buttons();
-        const isActive = userscriptBtn.classList.contains(
-          "sidebar__selector-mode--active",
-        );
-
-        if (!isActive) {
-          const currentBtn = [...allButtons].find(
-            (b) =>
-              b !== userscriptBtn &&
-              b.classList.contains("sidebar__selector-mode--active"),
-          );
-          const currentMenu = [...allMenus].find(
-            (m) => !m.classList.contains("hidden"),
-          );
-
-          userscriptPrevButton = currentBtn || null;
-          userscriptPrevMenu = currentMenu || null;
-
-          allButtons.forEach((b) =>
-            b.classList.toggle("sidebar__selector-mode--active", b === userscriptBtn),
-          );
-          allMenus.forEach((m) => m.classList.add("hidden"));
-          userscriptMenu.classList.remove("hidden");
-        } else {
-          userscriptBtn.classList.remove("sidebar__selector-mode--active");
-          userscriptMenu.classList.add("hidden");
-          if (userscriptPrevButton && userscriptPrevMenu) {
-            userscriptPrevButton.classList.add("sidebar__selector-mode--active");
-            userscriptPrevMenu.classList.remove("hidden");
-          }
-        }
-      });
-
-      buttons().forEach((b) => {
-        if (b === userscriptBtn) return;
-        b.addEventListener("click", () => {
-          userscriptBtn.classList.remove("sidebar__selector-mode--active");
-          userscriptMenu.classList.add("hidden");
-        });
-      });
-    };
-
     const showQuotePreview = ({ name, msg, color, created }) => {
       clearInterval(previewInterval);
+
       let preview = document.getElementById("quote-preview");
       if (!preview) {
         preview = document.createElement("div");
@@ -897,18 +640,23 @@
         };
 
         preview.append(span, cancel);
+
         const form = document.querySelector("form.input");
-        const menus = form?.querySelector(".input__menus");
         const main = form?.querySelector(".input__main");
-        if (menus && main) form.insertBefore(preview, main);
+        if (form && main) form.insertBefore(preview, main);
       }
+
       const span = preview.querySelector("span");
       const cleanMsg = cleanMessage(msg);
+
       const updateTime = () => {
         const time = getRelativeTime(created);
         const displayText = smartSlice(cleanMsg, 100, 50, 10);
-        span.innerHTML = `Quoting <b style="color: ${color};">${name}</b> @ ${time} — ${displayText}`;
+        const showColor = color || DEFAULT_NAME_COLOR;
+        const nameHtml = `<b style="color:${showColor};">${name}</b>`;
+        span.innerHTML = `Quoting ${nameHtml} @ ${time} — ${displayText}`;
       };
+
       updateTime();
       previewInterval = setInterval(updateTime, 1000);
     };
@@ -916,73 +664,55 @@
     const applyQuote = (messageData) => {
       pendingQuote = messageData;
       showQuotePreview(pendingQuote);
-      const input = document.querySelector("textarea.input__text");
-      if (input) input.focus();
-    };
-
-    const getVisibleMessages = () => {
-      const container = document.getElementById("umi-messages");
-      return [...container.children].filter((msg) =>
-        msg.classList.contains("message"),
-      );
+      document.querySelector("textarea.input__text")?.focus();
     };
 
     const clearSelectedMessage = () => {
       const messages = getVisibleMessages();
-      messages.forEach((msg) => msg.classList.remove("selected-quote"));
+      for (const m of messages) m.classList.remove("selected-quote");
       selectedMessageIndex = -1;
     };
 
     const selectMessage = (index) => {
       const messages = getVisibleMessages();
       clearSelectedMessage();
+
       if (index >= 0 && index < messages.length) {
         selectedMessageIndex = index;
-        messages[index].classList.add("selected-quote");
-        const messageData = extractMessageData(messages[index]);
-        if (messageData) {
-          applyQuote(messageData);
-        }
-      } else {
-        pendingQuote = null;
-        const preview = document.getElementById("quote-preview");
-        if (preview) preview.remove();
-        clearInterval(previewInterval);
+        const msg = messages[index];
+        msg.classList.add("selected-quote");
+        const messageData = extractMessageData(msg);
+        if (messageData) applyQuote(messageData);
+        return;
       }
+
+      pendingQuote = null;
+      document.getElementById("quote-preview")?.remove();
+      clearInterval(previewInterval);
     };
 
     const extractMessageData = (msg) => {
       const userEl = msg.querySelector(".message__user");
-      const textEl =
-        msg.querySelector(".message__text") ||
-        msg.querySelector(".message-tiny-text");
+      const textEl = msg.querySelector(".message__text") || msg.querySelector(".message-tiny-text");
       const timeEl = msg.querySelector(".message__time");
-      const dataCreated = msg.getAttribute("data-created");
-      const raw = userEl?.style?.color;
-      const userColor = !raw || raw === "inherit" ? null : rgbToHex(raw);
-      const name = userEl?.textContent?.trim() || "Unknown";
-      const msgText = cleanMessage(
-        msg.dataset.body || textEl?.textContent.trim() || "",
-      );
-
       if (!userEl || !textEl || !timeEl) return null;
 
-      return {
-        name,
-        color: userColor,
-        created: dataCreated,
-        id: msg.dataset.id,
-        msg: msgText,
-      };
+      const dataCreated = msg.getAttribute("data-created");
+      const raw = userEl.style?.color;
+      const userColor = !raw || raw === "inherit" ? null : rgbToHex(raw);
+      const name = userEl.textContent?.trim() || "Unknown";
+      const msgText = cleanMessage(msg.dataset.body || textEl.textContent?.trim() || "");
+
+      return { name, color: userColor, created: dataCreated, id: msg.dataset.id, msg: msgText };
     };
 
     const enhanceScriptQuote = (msg, textEl) => {
-      if (!textEl || msg.dataset.enhancedQuote === "1") return;
+      if (!textEl) return;
+      if (msg.dataset.enhancedQuote === "1") return;
 
       const anchor = textEl.querySelector('a[href^="#"]');
       const qEl = textEl.querySelector("q");
       const metaI = textEl.querySelector("i");
-
       if (!anchor || !qEl || !metaI) return;
 
       const aText = anchor.textContent || "";
@@ -992,9 +722,7 @@
       const idMatch = href.match(/^#(\d{17})$/);
       const targetId = idMatch ? idMatch[1] : null;
 
-      const arrowSpan = [...textEl.querySelectorAll("span")].find((s) =>
-        s.textContent.includes("└"),
-      );
+      const arrowSpan = [...textEl.querySelectorAll("span")].find((s) => (s.textContent || "").includes("└"));
       const br = textEl.querySelector("br");
 
       metaI.classList.add("ultreme-inline-quote");
@@ -1003,10 +731,7 @@
       if (arrowSpan) arrowSpan.classList.add("ultreme-inline-quote");
       if (br) br.classList.add("ultreme-inline-quote");
 
-      let targetMsg = null;
-      if (targetId) {
-        targetMsg = document.getElementById(`message-${targetId}`);
-      }
+      const targetMsg = targetId ? document.getElementById(`message-${targetId}`) : null;
 
       const quoteContainer = document.createElement("div");
       quoteContainer.className = "message__quote";
@@ -1014,12 +739,10 @@
       const avatarImg = document.createElement("img");
       avatarImg.className = "message__quote-avatar";
       avatarImg.alt = "";
+      avatarImg.src = DEFAULT_AVATAR_URL;
 
-      if (targetMsg) {
-        const authorId = targetMsg.dataset?.author;
-        if (authorId) {
-          avatarImg.src = `https://flashii.net/assets/avatar/${authorId}?res=80`;
-        }
+      if (targetMsg?.dataset?.author) {
+        avatarImg.src = `https://flashii.net/assets/avatar/${targetMsg.dataset.author}?res=80`;
       }
 
       let quotedName = "Unknown";
@@ -1027,16 +750,14 @@
       let quotedCreated = null;
       let relTime = "";
 
-      if (metaI) {
+      {
         const headerText = metaI.textContent || "";
         const atIdx = headerText.indexOf("@ ");
         const dashIdx = headerText.lastIndexOf("—");
-
         if (atIdx !== -1) {
           const namePart = headerText.slice(0, atIdx).trim();
           if (namePart) quotedName = namePart;
         }
-
         if (atIdx !== -1 && dashIdx !== -1 && dashIdx > atIdx + 2) {
           relTime = headerText.slice(atIdx + 2, dashIdx).trim();
         }
@@ -1051,40 +772,25 @@
           quotedColor = rawColor.startsWith("#") ? rawColor : rgbToHex(rawColor);
         }
         quotedCreated = targetMsg.getAttribute("data-created");
-      } else if (metaI) {
+      } else {
         const nameB = metaI.querySelector("b");
-        const colourSource =
-          metaI.querySelector('span[style*="color"]') ||
-          nameB?.parentElement ||
-          nameB;
-
-        const rawColor =
-          colourSource && colourSource.style
-            ? colourSource.style.color
-            : null;
-
+        const colourSource = metaI.querySelector('span[style*="color"]') || nameB?.parentElement || nameB;
+        const rawColor = colourSource?.style?.color || null;
         if (rawColor && rawColor !== "inherit") {
           quotedColor = rawColor.startsWith("#") ? rawColor : rgbToHex(rawColor);
         }
       }
 
-      if (!relTime && quotedCreated) {
-        relTime = getRelativeTime(quotedCreated);
-      }
+      if (!relTime && quotedCreated) relTime = getRelativeTime(quotedCreated);
 
       const body = document.createElement("div");
       body.className = "message__quote-body";
 
       const header = document.createElement("div");
       header.className = "message__quote-header";
-      header.innerHTML = `${
-        quotedColor
-          ? `<b style="color:${quotedColor};">${quotedName}</b>`
-          : `<b>${quotedName}</b>`
-      }${
-        relTime
-          ? ` <span style="color:var(--theme-colour-message-time-colour);">@ ${relTime}</span>`
-          : ""
+      const showColor = quotedColor || DEFAULT_NAME_COLOR;
+      header.innerHTML = `<b style="color:${showColor};">${quotedName}</b>${
+        relTime ? ` <span style="color:var(--theme-colour-message-time-colour);">@ ${relTime}</span>` : ""
       }`;
 
       const textDiv = document.createElement("div");
@@ -1092,28 +798,23 @@
 
       const rawQuoted = qEl.textContent || "";
       const withoutEmbed = rawQuoted.replace(/\[Embed\]/gi, "").trim();
-      const urlPattern = /(https?:)?\/\/\S+/g;
-      const hasUrl = urlPattern.test(withoutEmbed);
-      urlPattern.lastIndex = 0;
+
+      const urlRe = /(https?:)?\/\/\S+/g;
+      const hasUrl = urlRe.test(withoutEmbed);
+      urlRe.lastIndex = 0;
 
       if (hasUrl) {
         let lastIndex = 0;
         let match;
-        const re = new RegExp(urlPattern);
-
-        while ((match = re.exec(withoutEmbed)) !== null) {
+        while ((match = urlRe.exec(withoutEmbed)) !== null) {
           const urlStart = match.index;
-          const urlEnd = re.lastIndex;
+          const urlEnd = urlRe.lastIndex;
 
           const before = withoutEmbed.slice(lastIndex, urlStart);
-          if (before) {
-            textDiv.appendChild(document.createTextNode(before));
-          }
+          if (before) textDiv.appendChild(document.createTextNode(before));
 
           let url = match[0];
-          if (!/^https?:\/\//i.test(url)) {
-            url = "https:" + url;
-          }
+          if (!/^https?:\/\//i.test(url)) url = "https:" + url;
 
           const link = document.createElement("a");
           link.href = url;
@@ -1129,9 +830,7 @@
         }
 
         const tail = withoutEmbed.slice(lastIndex);
-        if (tail) {
-          textDiv.appendChild(document.createTextNode(tail));
-        }
+        if (tail) textDiv.appendChild(document.createTextNode(tail));
       } else {
         textDiv.textContent = withoutEmbed;
       }
@@ -1139,9 +838,7 @@
       body.appendChild(header);
       body.appendChild(textDiv);
 
-      if (avatarImg.src) {
-        quoteContainer.appendChild(avatarImg);
-      }
+      quoteContainer.appendChild(avatarImg);
       quoteContainer.appendChild(body);
 
       const container = msg.querySelector(".message__container");
@@ -1155,7 +852,7 @@
           bodyWrapper = document.createElement("div");
           bodyWrapper.className = "message__body";
 
-          if (textEl && textEl.parentNode === container) {
+          if (textEl.parentNode === container) {
             container.insertBefore(bodyWrapper, textEl);
             bodyWrapper.appendChild(textEl);
           } else {
@@ -1163,101 +860,245 @@
           }
         }
 
-        if (textEl && textEl.parentNode === bodyWrapper) {
-          bodyWrapper.insertBefore(quoteContainer, textEl);
-        } else {
-          bodyWrapper.insertBefore(quoteContainer, bodyWrapper.firstChild);
-        }
-      } else if (meta && meta.parentNode) {
+        if (textEl.parentNode === bodyWrapper) bodyWrapper.insertBefore(quoteContainer, textEl);
+        else bodyWrapper.insertBefore(quoteContainer, bodyWrapper.firstChild);
+      } else if (meta?.parentNode) {
         meta.parentNode.insertBefore(quoteContainer, meta.nextSibling);
       }
 
       if (targetId) {
         quoteContainer.addEventListener("click", (ev) => {
-          if (
-            ev.target &&
-            ev.target.closest &&
-            ev.target.closest(".message__quote-media")
-          ) {
-            return;
-          }
-          const target = document.getElementById(`message-${targetId}`);
-          if (target) {
-            target.scrollIntoView({ behavior: "smooth", block: "center" });
-            target.classList.add("highlight-temp");
-            setTimeout(
-              () => target.classList.remove("highlight-temp"),
-              1500,
-            );
-          }
+          if (ev.target?.closest?.(".message__quote-media")) return;
+          scrollToMessageId(targetId);
         });
       }
 
       msg.dataset.enhancedQuote = "1";
     };
 
-    const processMessage = (msg, input, uid) => {
+    const setupUserscriptSettingsTab = () => {
+      if (window.__ultremeSidebarMenuInstalled) return true;
+
+      const menusApi = window.Umi?.UI?.Menus;
+      if (!menusApi || typeof menusApi.Add !== "function") return false;
+
+      try {
+        menusApi.Add(ULTREME_MENU_ID, "Ultreme Script");
+      } catch {}
+
+      const panel = document.getElementById(`umi-menus-${ULTREME_MENU_ID}`);
+      const iconHost = document.getElementById(`umi-menu-icons-${ULTREME_MENU_ID}`);
+      if (!panel || !iconHost) return false;
+
+      if (!iconHost.querySelector(".fa-code")) {
+        const i = document.createElement("i");
+        i.className = "fas fa-code sidebar-gutter-font-icon";
+        iconHost.appendChild(i);
+      }
+
+      if (!panel.__ultremeBuilt) {
+        panel.__ultremeBuilt = true;
+        panel.classList.add("sidebar__menu--settings", "sidebar__menu--userscript");
+
+        const createCategory = (titleText) => {
+          const wrapper = document.createElement("div");
+
+          const header = document.createElement("div");
+          header.className = "setting__category-title";
+          header.textContent = titleText;
+
+          const body = document.createElement("div");
+          body.className = "setting__category";
+
+          wrapper.append(header, body);
+          panel.appendChild(wrapper);
+
+          let open = true;
+          header.addEventListener("click", () => {
+            const duration = 260;
+            const ease = (t) => 1 - Math.pow(1 - t, 3);
+
+            const startHeight = body.getBoundingClientRect().height;
+            body.style.overflow = "hidden";
+
+            let endHeight = 0;
+            if (!open) {
+              body.style.height = "auto";
+              endHeight = body.getBoundingClientRect().height;
+              body.style.height = `${startHeight}px`;
+            }
+
+            const from = startHeight;
+            const to = open ? 0 : endHeight;
+            open = !open;
+
+            const start = performance.now();
+            const tick = (now) => {
+              const t = Math.min(1, (now - start) / duration);
+              const v = from + (to - from) * ease(t);
+              body.style.height = `${v}px`;
+              if (t < 1) requestAnimationFrame(tick);
+              else {
+                body.style.height = open ? "auto" : "0";
+                body.style.overflow = "";
+              }
+            };
+            requestAnimationFrame(tick);
+          });
+
+          return body;
+        };
+
+        const addHint = (body, text) => {
+          const hint = document.createElement("div");
+          hint.className = "setting__hint";
+          hint.textContent = text;
+          body.appendChild(hint);
+        };
+
+        const addCheckbox = (body, cls, labelText) => {
+          const container = document.createElement("div");
+          container.className = "setting__container setting__container--checkbox";
+
+          const label = document.createElement("label");
+          label.className = "setting__label";
+
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          input.className = `setting__input ${cls}`;
+
+          const text = document.createElement("div");
+          text.textContent = labelText;
+
+          label.append(input, text);
+          container.appendChild(label);
+          body.appendChild(container);
+          return input;
+        };
+
+        const quotingBody = createCategory("Quoting");
+        const deletingBody = createCategory("Deleting");
+        const miscBody = createCategory("Misc.");
+
+        const showQuoteButtonInput = addCheckbox(quotingBody, "js-ultreme-showQuoteButton", 'Show "Quote" button');
+        const showGotoButtonInput = addCheckbox(quotingBody, "js-ultreme-showGotoButton", 'Show "Go to quote" button');
+        const enableQuoteBlocksInput = addCheckbox(quotingBody, "js-ultreme-enableQuoteBlocks", "Render quotes as blocks");
+
+        addHint(deletingBody, "Hold shift and click your message's timestamp to delete");
+        const enableDeleteInput = addCheckbox(deletingBody, "js-ultreme-enableDelete", "Enable Delete");
+        const showDeleteButtonInput = addCheckbox(deletingBody, "js-ultreme-showDeleteButton", "Show Delete button");
+
+        const enableUploadProgressInput = addCheckbox(miscBody, "js-ultreme-enableUploadProgress", "Show upload progress bar");
+        const enableForumButtonInput = addCheckbox(miscBody, "js-ultreme-enableForumButton", "Show Flashii logo (Go to Forum) button");
+
+        showQuoteButtonInput.checked = showQuoteButton;
+        showGotoButtonInput.checked = showGotoButton;
+        enableQuoteBlocksInput.checked = enableQuoteBlocks;
+        enableDeleteInput.checked = enableDelete;
+        showDeleteButtonInput.checked = showDeleteButton;
+        enableUploadProgressInput.checked = enableUploadProgress;
+        enableForumButtonInput.checked = enableForumButton;
+
+        showQuoteButtonInput.addEventListener("change", () => {
+          showQuoteButton = showQuoteButtonInput.checked;
+          saveBoolSetting("showQuoteButton", showQuoteButton);
+          document.querySelectorAll(".quote-button").forEach((btn) => (btn.style.display = showQuoteButton ? "" : "none"));
+        });
+
+        showGotoButtonInput.addEventListener("change", () => {
+          showGotoButton = showGotoButtonInput.checked;
+          saveBoolSetting("showGotoButton", showGotoButton);
+          document.querySelectorAll(".goto-button").forEach((btn) => (btn.style.display = showGotoButton ? "" : "none"));
+        });
+
+        enableQuoteBlocksInput.addEventListener("change", () => {
+          enableQuoteBlocks = enableQuoteBlocksInput.checked;
+          saveBoolSetting("enableQuoteBlocks", enableQuoteBlocks);
+          document.body.dataset.ultremeQuoteBlocks = enableQuoteBlocks ? "1" : "0";
+        });
+
+        enableDeleteInput.addEventListener("change", () => {
+          enableDelete = enableDeleteInput.checked;
+          saveBoolSetting("enableDelete", enableDelete);
+          document.querySelectorAll(".delete-button").forEach((btn) => {
+            btn.style.display = enableDelete && showDeleteButton ? "" : "none";
+          });
+        });
+
+        showDeleteButtonInput.addEventListener("change", () => {
+          showDeleteButton = showDeleteButtonInput.checked;
+          saveBoolSetting("showDeleteButton", showDeleteButton);
+          document.querySelectorAll(".delete-button").forEach((btn) => {
+            btn.style.display = enableDelete && showDeleteButton ? "" : "none";
+          });
+        });
+
+        enableUploadProgressInput.addEventListener("change", () => {
+          enableUploadProgress = enableUploadProgressInput.checked;
+          saveBoolSetting("enableUploadProgress", enableUploadProgress);
+          if (enableUploadProgress) installUploadProgress();
+          else uninstallUploadProgress();
+        });
+
+        enableForumButtonInput.addEventListener("change", () => {
+          enableForumButton = enableForumButtonInput.checked;
+          saveBoolSetting("enableForumButton", enableForumButton);
+          if (enableForumButton) addForumButton();
+          else removeForumButton();
+        });
+      }
+
+      window.__ultremeSidebarMenuInstalled = true;
+      return true;
+    };
+
+    const installMenuRetry = () => {
+      if (setupUserscriptSettingsTab()) return;
+      setTimeout(installMenuRetry, 150);
+    };
+
+    const processMessage = (msg) => {
       if (processedMessages.has(msg)) return;
       processedMessages.add(msg);
 
+      const inputEl = document.querySelector("textarea.input__text");
+      if (!inputEl) return;
+
       const id = msg.dataset.id;
       const author = msg.dataset.author;
-      const body = msg.dataset.body || "";
-      if (
-        !input ||
-        ["has disconnected", "has joined"].some((p) => body.includes(p))
-      )
-        return;
+      const bodyText = msg.dataset.body || "";
 
-      const textEl =
-        msg.querySelector(".message__text") ||
-        msg.querySelector(".message-tiny-text");
+      if (["has disconnected", "has joined"].some((p) => bodyText.includes(p))) return;
+
+      const textEl = msg.querySelector(".message__text") || msg.querySelector(".message-tiny-text");
       const userEl = msg.querySelector(".message__user");
       const timeEl = msg.querySelector(".message__time");
+      if (!textEl || !userEl) return;
 
       const dataCreated = msg.getAttribute("data-created");
-      const raw = userEl?.style?.color;
+      const raw = userEl.style?.color;
       const userColor = !raw || raw === "inherit" ? null : rgbToHex(raw);
-      const name = userEl?.textContent?.trim() || "Unknown";
-      let msgText = cleanMessage(
-        msg.dataset.body || textEl?.textContent.trim() || "",
-      );
+      const name = userEl.textContent?.trim() || "Unknown";
+      const msgText = cleanMessage(msg.dataset.body || textEl.textContent?.trim() || "");
 
       if (timeEl) {
         timeEl.onclick = (e) => {
           if (enableDelete && e.shiftKey && author === uid) {
-            Umi.Server.SendMessage(`/delete ${id}`);
-          } else {
-            clearSelectedMessage();
-            msg.classList.add("selected-quote");
-            applyQuote({
-              name,
-              color: userColor,
-              created: dataCreated,
-              id,
-              msg: msgText,
-            });
+            window.Umi?.Server?.SendMessage?.(`/delete ${id}`);
+            return;
           }
+          clearSelectedMessage();
+          msg.classList.add("selected-quote");
+          applyQuote({ name, color: userColor, created: dataCreated, id, msg: msgText });
         };
       }
 
-      const relTimeEl = textEl?.querySelector("i");
+      const relTimeEl = textEl.querySelector("i");
       if (relTimeEl) {
         relTimeEl.onclick = () => {
-          const anchor = textEl.querySelector('a[href^="#"]');
-          const idMatch = anchor?.getAttribute("href")?.match(/^#(\d{17})$/);
-          if (idMatch) {
-            const targetId = idMatch[1];
-            const target = document.getElementById(`message-${targetId}`);
-            if (target) {
-              target.scrollIntoView({ behavior: "smooth", block: "center" });
-              target.classList.add("highlight-temp");
-              setTimeout(
-                () => target.classList.remove("highlight-temp"),
-                1500,
-              );
-            }
-          }
+          const a = textEl.querySelector('a[href^="#"]');
+          const idMatch = a?.getAttribute("href")?.match(/^#(\d{17})$/);
+          if (idMatch) scrollToMessageId(idMatch[1]);
         };
       }
 
@@ -1274,13 +1115,12 @@
         del.className = "delete-button";
         del.innerHTML = "&times;";
         del.title = "Delete this message";
-        del.onclick = () => Umi.Server.SendMessage(`/delete ${id}`);
-        del.style.display =
-          enableDelete && showDeleteButton ? "" : "none";
+        del.onclick = () => window.Umi?.Server?.SendMessage?.(`/delete ${id}`);
+        del.style.display = enableDelete && showDeleteButton ? "" : "none";
         btnContainer.appendChild(del);
       }
 
-      if (!msg.querySelector(".quote-button") && textEl && userEl && timeEl) {
+      if (!msg.querySelector(".quote-button")) {
         const btn = document.createElement("button");
         btn.className = "quote-button";
         btn.textContent = "Quote";
@@ -1288,41 +1128,22 @@
         btn.onclick = () => {
           clearSelectedMessage();
           msg.classList.add("selected-quote");
-          applyQuote({
-            name,
-            color: userColor,
-            created: dataCreated,
-            id,
-            msg: msgText,
-          });
+          applyQuote({ name, color: userColor, created: dataCreated, id, msg: msgText });
         };
         btn.style.display = showQuoteButton ? "" : "none";
         btnContainer.appendChild(btn);
       }
 
-      if (
-        !msg.querySelector(".goto-button") &&
-        textEl?.querySelector('a[href^="#"]')
-      ) {
-        const anchor = textEl.querySelector('a[href^="#"]');
-        const idMatch = anchor?.getAttribute("href")?.match(/^#(\d{17})$/);
+      if (!msg.querySelector(".goto-button")) {
+        const a = textEl.querySelector('a[href^="#"]');
+        const idMatch = a?.getAttribute("href")?.match(/^#(\d{17})$/);
         if (idMatch) {
           const targetId = idMatch[1];
           const go = document.createElement("button");
           go.className = "goto-button";
           go.textContent = "Go to quoted";
           go.title = "Scroll to quoted message";
-          go.onclick = () => {
-            const target = document.getElementById(`message-${targetId}`);
-            if (target) {
-              target.scrollIntoView({ behavior: "smooth", block: "center" });
-              target.classList.add("highlight-temp");
-              setTimeout(
-                () => target.classList.remove("highlight-temp"),
-                1500,
-              );
-            }
-          };
+          go.onclick = () => scrollToMessageId(targetId);
           go.style.display = showGotoButton ? "" : "none";
           btnContainer.appendChild(go);
         }
@@ -1332,60 +1153,56 @@
     };
 
     const processNewMessages = () => {
-      const input = document.querySelector("textarea.input__text");
-      const container = document.getElementById("umi-messages");
+      const container = getMessagesContainer();
+      if (!container) return;
+
       const children = [...container.children];
       for (let i = children.length - 1; i >= 0; i--) {
         const msg = children[i];
-        if (msg.classList.contains("message")) {
-          if (processedMessages.has(msg)) break;
-          processMessage(msg, input, uid);
-        }
+        if (!msg.classList.contains("message")) continue;
+        if (processedMessages.has(msg)) break;
+        processMessage(msg);
       }
     };
 
     injectCSS();
-    setupUserscriptSettingsTab();
+    installMenuRetry();
     processNewMessages();
     addForumButton();
 
-    new MutationObserver(processNewMessages).observe(
-      document.getElementById("umi-messages"),
-      { childList: true },
-    );
+    const container = getMessagesContainer();
+    if (container) new MutationObserver(processNewMessages).observe(container, { childList: true });
 
     const form = document.querySelector("form.input");
     const input = document.querySelector("textarea.input__text");
 
     if (form && input && !form.__quoteIntercepted) {
       form.__quoteIntercepted = true;
+
       form.addEventListener(
         "submit",
         () => {
-          if (pendingQuote) {
-            const { name, color, id, msg, created } = pendingQuote;
-            const hidden = "\u200C";
-            const cleanMsg = cleanMessage(msg);
-            const time = getRelativeTime(created);
-            const storedText = smartSlice(cleanMsg, 100, 50, 10);
-            const quoteBlock = `[i]${
-              color ? `[color=${color}]` : ""
-            }[b]${name}[/b]${
-              color ? "[/color]" : ""
-            } [color=var(--theme-colour-message-time-colour)]@ ${time} —[/color][/i][url=#${id}]${hidden}[/url] [quote]${storedText}[/quote]`;
-            const full = `${quoteBlock}${
-              input.value
-                ? `\n[color=var(--theme-colour-message-time-colour)]└─[/color] ` +
-                  input.value.trimStart()
-                : ""
-            }`;
-            input.value = full;
-            pendingQuote = null;
-            const preview = document.getElementById("quote-preview");
-            if (preview) preview.remove();
-            clearInterval(previewInterval);
-            clearSelectedMessage();
-          }
+          if (!pendingQuote) return;
+
+          const { name, color, id, msg, created } = pendingQuote;
+          const hidden = "\u200C";
+          const cleanMsg = cleanMessage(msg);
+          const time = getRelativeTime(created);
+          const storedText = smartSlice(cleanMsg, 100, 50, 10);
+
+          const nameColor = color || DEFAULT_NAME_COLOR;
+
+          const quoteBlock = `[i][color=${nameColor}][b]${name}[/b][/color] [color=var(--theme-colour-message-time-colour)]@ ${time} —[/color][/i][url=#${id}]${hidden}[/url][quote]${storedText}[/quote]`;
+
+          const userText = (input.value || "").replace(/^[ \t]+/, "");
+          const full = `${quoteBlock}${userText ? `\n[color=var(--theme-colour-message-time-colour)]└─ [/color]${userText}` : ""}`;
+
+          input.value = full;
+          pendingQuote = null;
+
+          document.getElementById("quote-preview")?.remove();
+          clearInterval(previewInterval);
+          clearSelectedMessage();
         },
         true,
       );
@@ -1396,29 +1213,24 @@
         e.preventDefault();
         pendingQuote = null;
         clearSelectedMessage();
-        const preview = document.getElementById("quote-preview");
-        if (preview) preview.remove();
+        document.getElementById("quote-preview")?.remove();
         clearInterval(previewInterval);
-      } else if (e.ctrlKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
-        e.preventDefault();
-        const messages = getVisibleMessages();
-        if (messages.length === 0) return;
+        return;
+      }
 
-        if (e.key === "ArrowUp") {
-          if (selectedMessageIndex === -1) {
-            selectMessage(messages.length - 1);
-          } else if (selectedMessageIndex > 0) {
-            selectMessage(selectedMessageIndex - 1);
-          }
-        } else if (e.key === "ArrowDown") {
-          if (selectedMessageIndex === -1) {
-            return;
-          } else if (selectedMessageIndex < messages.length - 1) {
-            selectMessage(selectedMessageIndex + 1);
-          } else {
-            selectMessage(-1);
-          }
-        }
+      if (!(e.ctrlKey && (e.key === "ArrowUp" || e.key === "ArrowDown"))) return;
+
+      e.preventDefault();
+      const messages = getVisibleMessages();
+      if (messages.length === 0) return;
+
+      if (e.key === "ArrowUp") {
+        if (selectedMessageIndex === -1) selectMessage(messages.length - 1);
+        else if (selectedMessageIndex > 0) selectMessage(selectedMessageIndex - 1);
+      } else {
+        if (selectedMessageIndex === -1) return;
+        if (selectedMessageIndex < messages.length - 1) selectMessage(selectedMessageIndex + 1);
+        else selectMessage(-1);
       }
     });
   });
