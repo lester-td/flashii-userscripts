@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Flashii Chat - Ultreme Script
 // @namespace    https://patchii.net/lester/flashii-chat-userscripts
-// @version      5.2
+// @version      5.3
 // @description  Better quotes & delete button, quote blocks, upload progress bar, and Go to Forum button with settings.
 // @author       lester
 // @match        *://chat.flashii.net/*
@@ -18,21 +18,17 @@
   "use strict";
 
   const W = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
-
   const STORAGE_PREFIX = "ultreme_";
   const cssID = "chat-style";
   const ULTREME_MENU_ID = "ultreme";
   const DEFAULT_NAME_COLOR = "#ffffff";
   const DEFAULT_AVATAR_URL = "https://flashii.net/assets/avatar/";
-
   const PATCHII_PAGE_URL = "https://patchii.net/lester/flashii-chat-userscripts";
-  const PATCHII_USERJS_URL =
-    "https://patchii.net/lester/flashii-chat-userscripts/raw/branch/trunk/ultreme-script.user.js";
-  const PATCHII_META_URL =
-    "https://patchii.net/lester/flashii-chat-userscripts/raw/branch/trunk/ultreme-script.meta.js";
+  const PATCHII_USERJS_URL = "https://patchii.net/lester/flashii-chat-userscripts/raw/branch/trunk/ultreme-script.user.js";
+  const PATCHII_META_URL = "https://patchii.net/lester/flashii-chat-userscripts/raw/branch/trunk/ultreme-script.meta.js";
 
-  const UPDATE_DISMISS_KEY = "dismissedUpdateFor";
-  let didUpdateCheck = false;
+  const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+  let didAutoUpdateCheck = false;
 
   const loadBoolSetting = (key, def) => {
     try {
@@ -47,22 +43,6 @@
   const saveBoolSetting = (key, val) => {
     try {
       localStorage.setItem(STORAGE_PREFIX + key, val ? "1" : "0");
-    } catch {}
-  };
-
-  const loadStringSetting = (key, def = "") => {
-    try {
-      const v = localStorage.getItem(STORAGE_PREFIX + key);
-      if (v === null) return def;
-      return String(v);
-    } catch {
-      return def;
-    }
-  };
-
-  const saveStringSetting = (key, val) => {
-    try {
-      localStorage.setItem(STORAGE_PREFIX + key, String(val));
     } catch {}
   };
 
@@ -84,6 +64,10 @@
 
   const NativeXHR = W.XMLHttpRequest;
   const uploads = new Map();
+
+  const __ultremeXhrMeta = new WeakMap();
+  const __ultremeOrigOpen = NativeXHR.prototype.open;
+  const __ultremeOrigSend = NativeXHR.prototype.send;
 
   const getMessagesContainer = () => document.getElementById("umi-messages");
 
@@ -192,54 +176,61 @@
     }
   }
 
-  function UploadXHR() {
-    const xhr = new NativeXHR();
+  function installUploadProgressPatchOnce() {
+    if (NativeXHR.prototype.__ultremeUploadPatched) return;
+    NativeXHR.prototype.__ultremeUploadPatched = true;
 
-    xhr.open = function (method, url) {
-      this._isUpload = method === "POST" && String(url || "").includes("/uploads");
-      return NativeXHR.prototype.open.apply(this, arguments);
+    NativeXHR.prototype.open = function (method, url) {
+      try {
+        const m = String(method || "").toUpperCase();
+        const u = String(url || "");
+        const isUpload = m === "POST" && u.includes("/uploads");
+        __ultremeXhrMeta.set(this, { isUpload, hooked: false, id: null });
+      } catch {}
+      return __ultremeOrigOpen.apply(this, arguments);
     };
 
-    xhr.send = function () {
-      if (this._isUpload && enableUploadProgress) {
-        const id = Math.random().toString(36).slice(2);
-        createProgressBar();
-        uploads.set(id, { loaded: 0, total: 0, done: false });
+    NativeXHR.prototype.send = function () {
+      try {
+        const meta = __ultremeXhrMeta.get(this);
 
-        this.upload.onprogress = (e) => {
-          if (e.lengthComputable) {
-            uploads.set(id, { loaded: e.loaded, total: e.total, done: false });
-            updateCombinedProgress();
+        if (enableUploadProgress && meta?.isUpload && !meta.hooked) {
+          meta.hooked = true;
+          meta.id = Math.random().toString(36).slice(2);
+          __ultremeXhrMeta.set(this, meta);
+
+          createProgressBar();
+          uploads.set(meta.id, { loaded: 0, total: 0, done: false });
+
+          if (this.upload && this.upload.addEventListener) {
+            this.upload.addEventListener("progress", (e) => {
+              if (e.lengthComputable) {
+                uploads.set(meta.id, { loaded: e.loaded, total: e.total, done: false });
+                updateCombinedProgress();
+              }
+            });
           }
-        };
 
-        this.addEventListener("loadend", () => {
-          const current = uploads.get(id);
-          if (current) {
-            uploads.set(id, { ...current, done: true });
-            updateCombinedProgress();
-          }
-        });
-      }
+          this.addEventListener("loadend", () => {
+            const current = uploads.get(meta.id);
+            if (current) {
+              uploads.set(meta.id, { ...current, done: true });
+              updateCombinedProgress();
+            }
+          });
+        }
+      } catch {}
 
-      return NativeXHR.prototype.send.apply(this, arguments);
+      return __ultremeOrigSend.apply(this, arguments);
     };
-
-    return xhr;
   }
 
-  function installUploadProgress() {
-    if (W.XMLHttpRequest === UploadXHR) return;
-    W.XMLHttpRequest = UploadXHR;
-  }
-
-  function uninstallUploadProgress() {
-    if (W.XMLHttpRequest === UploadXHR) W.XMLHttpRequest = NativeXHR;
+  function disableUploadProgressUI() {
     document.getElementById("upload-progress-wrapper")?.remove();
     uploads.clear();
   }
 
-  if (enableUploadProgress) installUploadProgress();
+  installUploadProgressPatchOnce();
 
   function addForumButton() {
     if (!enableForumButton) return;
@@ -459,7 +450,7 @@
     else form.insertBefore(el, main);
   };
 
-  const showUpdatePrompt = (remoteVer) => {
+  const showAutoUpdatePrompt = (remoteVer) => {
     const existing = document.getElementById("ultreme-update-prompt");
     if (existing) existing.remove();
 
@@ -490,18 +481,14 @@
     dismiss.id = "ultreme-update-dismiss";
     dismiss.textContent = "×";
     dismiss.title = "Dismiss";
-    dismiss.onclick = () => {
-      saveStringSetting(UPDATE_DISMISS_KEY, remoteVer);
-      prompt.remove();
-    };
-
+    dismiss.onclick = () => prompt.remove();
     prompt.append(span, actions, dismiss);
     insertBanner(prompt);
   };
 
-  const runUpdateCheckOnce = async () => {
-    if (didUpdateCheck) return;
-    didUpdateCheck = true;
+  const runAutoUpdateCheckOnce = async () => {
+    if (didAutoUpdateCheck) return;
+    didAutoUpdateCheck = true;
 
     const localVer = getInstalledVersion();
     if (!localVer) return;
@@ -514,11 +501,49 @@
     }
     if (!remoteVer) return;
 
-    const dismissedFor = loadStringSetting(UPDATE_DISMISS_KEY, "");
-    if (dismissedFor === remoteVer) return;
-
-    if (isVersionNewer(remoteVer, localVer)) showUpdatePrompt(remoteVer);
+    if (isVersionNewer(remoteVer, localVer)) showAutoUpdatePrompt(remoteVer);
   };
+
+  const runManualUpdateCheck = async (ui) => {
+    const localVer = getInstalledVersion();
+    if (!localVer) {
+      ui.setStatus("Unable to read installed version.");
+      ui.setUpdateAvailable(false);
+      return;
+    }
+
+    ui.setStatus("Checking for updates...");
+    ui.setUpdateAvailable(false);
+
+    let remoteVer = null;
+    try {
+      remoteVer = await fetchRemoteVersion();
+    } catch {
+      ui.setStatus("Update check failed. Please try again.");
+      ui.setUpdateAvailable(false);
+      return;
+    }
+
+    if (!remoteVer) {
+      ui.setStatus("Unable to determine remote version.");
+      ui.setUpdateAvailable(false);
+      return;
+    }
+
+    if (isVersionNewer(remoteVer, localVer)) {
+      ui.setStatus(`Update available: ${remoteVer}`);
+      ui.setUpdateAvailable(true);
+      return;
+    }
+
+    ui.setStatus(`You're on the latest!`);
+    ui.setUpdateAvailable(false);
+  };
+
+  setInterval(() => {
+    didAutoUpdateCheck = false;
+    runAutoUpdateCheckOnce();
+  }, UPDATE_CHECK_INTERVAL_MS);
 
   document.addEventListener("mouseup", () => {
     const sel = W.getSelection?.();
@@ -550,7 +575,7 @@
     const uid = W.Umi?.User?.getCurrentUser?.()?.id;
     if (!uid) return;
 
-    runUpdateCheckOnce();
+    runAutoUpdateCheckOnce();
 
     document.body.dataset.ultremeQuoteBlocks = enableQuoteBlocks ? "1" : "0";
 
@@ -623,7 +648,6 @@
         .message:hover .goto-button {
           opacity: 1;
         }
-
         #quote-preview {
           background: var(--theme-colour-input-background);
           border: 1px solid var(--theme-colour-settings-input-border);
@@ -653,7 +677,6 @@
           font-size: 13px;
           align-self: flex-start;
         }
-
         #ultreme-update-prompt {
           background: var(--theme-colour-input-background);
           border: 1px solid var(--theme-colour-settings-input-border);
@@ -700,22 +723,6 @@
           font-weight: bold;
           padding: 0 6px;
           font-size: 13px;
-        }
-        .ultreme-about {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          text-align: center;
-        }
-        .ultreme-about .setting__container {
-          justify-content: center;
-        }
-        .ultreme-about .setting__label {
-          justify-content: center;
-        }
-        .ultreme-about button,
-        .ultreme-about a {
-          width: fit-content;
         }
 
         .highlight-temp {
@@ -1215,6 +1222,17 @@
           return input;
         };
 
+        const createButtonRow = (body, text, onClick) => {
+          const wrap = document.createElement("div");
+          wrap.className = "setting__container setting__container--button";
+          wrap.innerHTML = `<label class="setting__label"><button type="button" class="setting__input"></button></label>`;
+          const btn = wrap.querySelector("button");
+          btn.textContent = text;
+          btn.addEventListener("click", onClick);
+          body.appendChild(wrap);
+          return { wrap, btn };
+        };
+
         const quotingBody = createCategory("Quoting");
         const deletingBody = createCategory("Deleting");
         const miscBody = createCategory("Misc.");
@@ -1277,8 +1295,7 @@
         enableUploadProgressInput.addEventListener("change", () => {
           enableUploadProgress = enableUploadProgressInput.checked;
           saveBoolSetting("enableUploadProgress", enableUploadProgress);
-          if (enableUploadProgress) installUploadProgress();
-          else uninstallUploadProgress();
+          if (!enableUploadProgress) disableUploadProgressUI();
         });
 
         enableForumButtonInput.addEventListener("change", () => {
@@ -1288,56 +1305,40 @@
           else removeForumButton();
         });
 
-        {
-          const ver = getInstalledVersion() || "unknown";
+        const ver = getInstalledVersion() || "unknown";
 
-          const line1 = document.createElement("div");
-          line1.className = "setting__hint";
-          line1.textContent = `Flashii Ultreme Script — Version ${ver}`;
+        const addLine = (text) => {
+          const d = document.createElement("div");
+          d.className = "mami-copyright";
+          d.textContent = text;
+          aboutBody.appendChild(d);
+          return d;
+        };
 
-          const line2 = document.createElement("div");
-          line2.className = "setting__hint";
-          line2.textContent = "by lester";
+        addLine("Flashii Ultreme Script");
+        addLine(`Version ${ver}`);
+        addLine("thank you to all users of flashii <3");
 
-          const line3 = document.createElement("div");
-          line3.className = "setting__hint";
-          line3.textContent = "thanks to all users of flashii";
+        createButtonRow(aboutBody, "View Project on Patchii", () => W.open(PATCHII_PAGE_URL, "_blank", "noopener,noreferrer"));
 
-          const btnWrap = document.createElement("div");
-          btnWrap.className = "setting__container";
+        createButtonRow(aboutBody, "Check for updates", () => {
+          runManualUpdateCheck(ui);
+        });
 
-          const btn = document.createElement("a");
-          btn.href = PATCHII_PAGE_URL;
-          btn.target = "_blank";
-          btn.rel = "noopener noreferrer";
-          btn.textContent = "View Project on Patchii";
-          btn.style.cssText = `
-            display: inline-block;
-            border: none;
-            border-radius: 2px;
-            padding: 4px 8px;
-            font-size: 13px;
-            cursor: pointer;
-            background: var(--theme-colour-input-menu-button);
-            color: var(--theme-colour-main-colour);
-            text-decoration: none;
-          `;
-          btn.addEventListener("mouseenter", () => {
-            btn.style.background = "var(--theme-colour-input-menu-button-hover)";
-          });
-          btn.addEventListener("mouseleave", () => {
-            btn.style.background = "var(--theme-colour-input-menu-button)";
-          });
-          btn.addEventListener("mousedown", () => {
-            btn.style.background = "var(--theme-colour-input-menu-button-active)";
-          });
-          btn.addEventListener("mouseup", () => {
-            btn.style.background = "var(--theme-colour-input-menu-button-hover)";
-          });
+        const updateStatusEl = addLine("");
+        updateStatusEl.id = "ultreme-about-update-status";
 
-          btnWrap.appendChild(btn);
-          aboutBody.append(line1, line2, line3, btnWrap);
-        }
+        const updateNowRow = createButtonRow(aboutBody, "Update now", () => W.open(PATCHII_USERJS_URL, "_blank", "noopener,noreferrer"));
+        updateNowRow.wrap.style.display = "none";
+
+        const ui = {
+          setStatus: (text) => {
+            updateStatusEl.textContent = text || "";
+          },
+          setUpdateAvailable: (on) => {
+            updateNowRow.wrap.style.display = on ? "" : "none";
+          },
+        };
       }
 
       W.__ultremeSidebarMenuInstalled = true;
