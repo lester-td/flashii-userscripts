@@ -1,11 +1,15 @@
 // ==UserScript==
 // @name         Flashii Chat - Ultreme Script
 // @namespace    https://patchii.net/lester/flashii-chat-userscripts
-// @version      5.1
+// @version      5.2
 // @description  Better quotes & delete button, quote blocks, upload progress bar, and Go to Forum button with settings.
 // @author       lester
 // @match        *://chat.flashii.net/*
-// @grant        none
+// @grant        unsafeWindow
+// @grant        GM_info
+// @grant        GM_xmlhttpRequest
+// @grant        GM.xmlHttpRequest
+// @connect      patchii.net
 // @downloadURL  https://patchii.net/lester/flashii-chat-userscripts/raw/branch/trunk/ultreme-script.user.js
 // @updateURL    https://patchii.net/lester/flashii-chat-userscripts/raw/branch/trunk/ultreme-script.meta.js
 // ==/UserScript==
@@ -13,11 +17,22 @@
 (() => {
   "use strict";
 
+  const W = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
+
   const STORAGE_PREFIX = "ultreme_";
   const cssID = "chat-style";
   const ULTREME_MENU_ID = "ultreme";
   const DEFAULT_NAME_COLOR = "#ffffff";
   const DEFAULT_AVATAR_URL = "https://flashii.net/assets/avatar/";
+
+  const PATCHII_PAGE_URL = "https://patchii.net/lester/flashii-chat-userscripts";
+  const PATCHII_USERJS_URL =
+    "https://patchii.net/lester/flashii-chat-userscripts/raw/branch/trunk/ultreme-script.user.js";
+  const PATCHII_META_URL =
+    "https://patchii.net/lester/flashii-chat-userscripts/raw/branch/trunk/ultreme-script.meta.js";
+
+  const UPDATE_DISMISS_KEY = "dismissedUpdateFor";
+  let didUpdateCheck = false;
 
   const loadBoolSetting = (key, def) => {
     try {
@@ -32,6 +47,22 @@
   const saveBoolSetting = (key, val) => {
     try {
       localStorage.setItem(STORAGE_PREFIX + key, val ? "1" : "0");
+    } catch {}
+  };
+
+  const loadStringSetting = (key, def = "") => {
+    try {
+      const v = localStorage.getItem(STORAGE_PREFIX + key);
+      if (v === null) return def;
+      return String(v);
+    } catch {
+      return def;
+    }
+  };
+
+  const saveStringSetting = (key, val) => {
+    try {
+      localStorage.setItem(STORAGE_PREFIX + key, String(val));
     } catch {}
   };
 
@@ -51,7 +82,7 @@
   const processedMessages = new WeakSet();
   let mediaModal = null;
 
-  const NativeXHR = window.XMLHttpRequest;
+  const NativeXHR = W.XMLHttpRequest;
   const uploads = new Map();
 
   const getMessagesContainer = () => document.getElementById("umi-messages");
@@ -198,12 +229,12 @@
   }
 
   function installUploadProgress() {
-    if (window.XMLHttpRequest === UploadXHR) return;
-    window.XMLHttpRequest = UploadXHR;
+    if (W.XMLHttpRequest === UploadXHR) return;
+    W.XMLHttpRequest = UploadXHR;
   }
 
   function uninstallUploadProgress() {
-    if (window.XMLHttpRequest === UploadXHR) window.XMLHttpRequest = NativeXHR;
+    if (W.XMLHttpRequest === UploadXHR) W.XMLHttpRequest = NativeXHR;
     document.getElementById("upload-progress-wrapper")?.remove();
     uploads.clear();
   }
@@ -242,7 +273,7 @@
 
     newButton.addEventListener("click", (event) => {
       event.preventDefault();
-      window.open("https://flashii.net/forum", "_blank");
+      W.open("https://flashii.net/forum", "_blank");
     });
 
     sidebarSelector.insertBefore(newButton, firstButton);
@@ -342,15 +373,155 @@
       img.style.maxHeight = "100%";
       content.appendChild(img);
     } else {
-      window.open(url, "_blank", "noopener,noreferrer");
+      W.open(url, "_blank", "noopener,noreferrer");
       return;
     }
 
     mediaModal.style.display = "flex";
   }
 
+  const getInstalledVersion = () => {
+    try {
+      if (typeof GM_info !== "undefined" && GM_info?.script?.version) return String(GM_info.script.version);
+    } catch {}
+    try {
+      if (typeof GM !== "undefined" && GM?.info?.script?.version) return String(GM.info.script.version);
+    } catch {}
+    return null;
+  };
+
+  const parseSemverish = (v) =>
+    String(v || "")
+      .trim()
+      .split(/[^\d]+/)
+      .filter(Boolean)
+      .map((x) => parseInt(x, 10) || 0);
+
+  const isVersionNewer = (remote, local) => {
+    const a = parseSemverish(remote);
+    const b = parseSemverish(local);
+    const n = Math.max(a.length, b.length);
+    for (let i = 0; i < n; i++) {
+      const av = a[i] ?? 0;
+      const bv = b[i] ?? 0;
+      if (av > bv) return true;
+      if (av < bv) return false;
+    }
+    return false;
+  };
+
+  const gmGetText = (url) =>
+    new Promise((resolve, reject) => {
+      const bust = `${url}${url.includes("?") ? "&" : "?"}_=${Date.now()}`;
+
+      if (typeof GM !== "undefined" && typeof GM.xmlHttpRequest === "function") {
+        GM.xmlHttpRequest({
+          method: "GET",
+          url: bust,
+          onload: (r) => resolve(r.responseText || ""),
+          onerror: () => reject(new Error("GM.xmlHttpRequest failed")),
+        });
+        return;
+      }
+
+      if (typeof GM_xmlhttpRequest === "function") {
+        GM_xmlhttpRequest({
+          method: "GET",
+          url: bust,
+          onload: (r) => resolve(r.responseText || ""),
+          onerror: () => reject(new Error("GM_xmlhttpRequest failed")),
+        });
+        return;
+      }
+
+      fetch(bust, { cache: "no-store" })
+        .then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.text();
+        })
+        .then(resolve)
+        .catch(reject);
+    });
+
+  const fetchRemoteVersion = async () => {
+    const text = await gmGetText(PATCHII_META_URL);
+    const m = text.match(/^\s*\/\/\s*@version\s+([^\s]+)\s*$/m);
+    return m ? m[1].trim() : null;
+  };
+
+  const insertBanner = (el) => {
+    const form = document.querySelector("form.input");
+    const main = form?.querySelector(".input__main");
+    if (!form || !main) return;
+
+    const quotePreview = document.getElementById("quote-preview");
+    if (quotePreview && quotePreview.parentElement === form) form.insertBefore(el, quotePreview);
+    else form.insertBefore(el, main);
+  };
+
+  const showUpdatePrompt = (remoteVer) => {
+    const existing = document.getElementById("ultreme-update-prompt");
+    if (existing) existing.remove();
+
+    const prompt = document.createElement("div");
+    prompt.id = "ultreme-update-prompt";
+
+    const span = document.createElement("span");
+    span.textContent = `Ultreme Script — Update to Version ${remoteVer} available.`;
+
+    const actions = document.createElement("div");
+    actions.className = "ultreme-update-actions";
+
+    const view = document.createElement("a");
+    view.href = PATCHII_PAGE_URL;
+    view.target = "_blank";
+    view.rel = "noopener noreferrer";
+    view.textContent = "View on Patchii";
+
+    const upd = document.createElement("a");
+    upd.href = PATCHII_USERJS_URL;
+    upd.target = "_blank";
+    upd.rel = "noopener noreferrer";
+    upd.textContent = "Update now";
+
+    actions.append(view, upd);
+
+    const dismiss = document.createElement("button");
+    dismiss.id = "ultreme-update-dismiss";
+    dismiss.textContent = "×";
+    dismiss.title = "Dismiss";
+    dismiss.onclick = () => {
+      saveStringSetting(UPDATE_DISMISS_KEY, remoteVer);
+      prompt.remove();
+    };
+
+    prompt.append(span, actions, dismiss);
+    insertBanner(prompt);
+  };
+
+  const runUpdateCheckOnce = async () => {
+    if (didUpdateCheck) return;
+    didUpdateCheck = true;
+
+    const localVer = getInstalledVersion();
+    if (!localVer) return;
+
+    let remoteVer = null;
+    try {
+      remoteVer = await fetchRemoteVersion();
+    } catch {
+      return;
+    }
+    if (!remoteVer) return;
+
+    const dismissedFor = loadStringSetting(UPDATE_DISMISS_KEY, "");
+    if (dismissedFor === remoteVer) return;
+
+    if (isVersionNewer(remoteVer, localVer)) showUpdatePrompt(remoteVer);
+  };
+
   document.addEventListener("mouseup", () => {
-    const sel = window.getSelection();
+    const sel = W.getSelection?.();
     const range = sel?.rangeCount ? sel.getRangeAt(0) : null;
     const inside =
       range?.commonAncestorContainer?.closest?.("#umi-messages") ||
@@ -375,9 +546,11 @@
     }
   });
 
-  window.addEventListener("umi:connect", () => {
-    const uid = window.Umi?.User?.getCurrentUser?.()?.id;
+  W.addEventListener("umi:connect", () => {
+    const uid = W.Umi?.User?.getCurrentUser?.()?.id;
     if (!uid) return;
+
+    runUpdateCheckOnce();
 
     document.body.dataset.ultremeQuoteBlocks = enableQuoteBlocks ? "1" : "0";
 
@@ -450,6 +623,7 @@
         .message:hover .goto-button {
           opacity: 1;
         }
+
         #quote-preview {
           background: var(--theme-colour-input-background);
           border: 1px solid var(--theme-colour-settings-input-border);
@@ -479,6 +653,71 @@
           font-size: 13px;
           align-self: flex-start;
         }
+
+        #ultreme-update-prompt {
+          background: var(--theme-colour-input-background);
+          border: 1px solid var(--theme-colour-settings-input-border);
+          padding: 6px 10px;
+          font-size: 13px;
+          margin: 4px -1px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          max-width: 100%;
+        }
+        #ultreme-update-prompt > span {
+          flex: 1 1 auto;
+          min-width: 0;
+        }
+        .ultreme-update-actions {
+          display: flex;
+          gap: 8px;
+          flex: 0 0 auto;
+          white-space: nowrap;
+        }
+        .ultreme-update-actions a {
+          border: none;
+          border-radius: 2px;
+          padding: 1px 6px;
+          font-size: 13px;
+          cursor: pointer;
+          background: var(--theme-colour-input-menu-button);
+          color: var(--theme-colour-main-colour);
+          text-decoration: none;
+        }
+        .ultreme-update-actions a:hover {
+          background: var(--theme-colour-input-menu-button-hover);
+        }
+        .ultreme-update-actions a:active {
+          background: var(--theme-colour-input-menu-button-active);
+        }
+        #ultreme-update-dismiss {
+          flex: 0 0 auto;
+          background: none;
+          border: none;
+          color: var(--theme-colour-main-colour);
+          cursor: pointer;
+          font-weight: bold;
+          padding: 0 6px;
+          font-size: 13px;
+        }
+        .ultreme-about {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          text-align: center;
+        }
+        .ultreme-about .setting__container {
+          justify-content: center;
+        }
+        .ultreme-about .setting__label {
+          justify-content: center;
+        }
+        .ultreme-about button,
+        .ultreme-about a {
+          width: fit-content;
+        }
+
         .highlight-temp {
           animation: blinkOutline 1s ease-in-out;
           outline: 2px solid transparent;
@@ -742,7 +981,7 @@
       avatarImg.src = DEFAULT_AVATAR_URL;
 
       if (targetMsg?.dataset?.author) {
-        avatarImg.src = `https://flashii.net/assets/avatar/${targetMsg.dataset.author}?res=80`;
+        avatarImg.src = `https://flashii.net/assets/avatar/${targetMsg.dataset.author}`;
       }
 
       let quotedName = "Unknown";
@@ -877,9 +1116,9 @@
     };
 
     const setupUserscriptSettingsTab = () => {
-      if (window.__ultremeSidebarMenuInstalled) return true;
+      if (W.__ultremeSidebarMenuInstalled) return true;
 
-      const menusApi = window.Umi?.UI?.Menus;
+      const menusApi = W.Umi?.UI?.Menus;
       if (!menusApi || typeof menusApi.Add !== "function") return false;
 
       try {
@@ -979,6 +1218,8 @@
         const quotingBody = createCategory("Quoting");
         const deletingBody = createCategory("Deleting");
         const miscBody = createCategory("Misc.");
+        const aboutBody = createCategory("About");
+        aboutBody.classList.add("ultreme-about");
 
         const showQuoteButtonInput = addCheckbox(quotingBody, "js-ultreme-showQuoteButton", 'Show "Quote" button');
         const showGotoButtonInput = addCheckbox(quotingBody, "js-ultreme-showGotoButton", 'Show "Go to quote" button');
@@ -1046,9 +1287,60 @@
           if (enableForumButton) addForumButton();
           else removeForumButton();
         });
+
+        {
+          const ver = getInstalledVersion() || "unknown";
+
+          const line1 = document.createElement("div");
+          line1.className = "setting__hint";
+          line1.textContent = `Flashii Ultreme Script — Version ${ver}`;
+
+          const line2 = document.createElement("div");
+          line2.className = "setting__hint";
+          line2.textContent = "by lester";
+
+          const line3 = document.createElement("div");
+          line3.className = "setting__hint";
+          line3.textContent = "thanks to all users of flashii";
+
+          const btnWrap = document.createElement("div");
+          btnWrap.className = "setting__container";
+
+          const btn = document.createElement("a");
+          btn.href = PATCHII_PAGE_URL;
+          btn.target = "_blank";
+          btn.rel = "noopener noreferrer";
+          btn.textContent = "View Project on Patchii";
+          btn.style.cssText = `
+            display: inline-block;
+            border: none;
+            border-radius: 2px;
+            padding: 4px 8px;
+            font-size: 13px;
+            cursor: pointer;
+            background: var(--theme-colour-input-menu-button);
+            color: var(--theme-colour-main-colour);
+            text-decoration: none;
+          `;
+          btn.addEventListener("mouseenter", () => {
+            btn.style.background = "var(--theme-colour-input-menu-button-hover)";
+          });
+          btn.addEventListener("mouseleave", () => {
+            btn.style.background = "var(--theme-colour-input-menu-button)";
+          });
+          btn.addEventListener("mousedown", () => {
+            btn.style.background = "var(--theme-colour-input-menu-button-active)";
+          });
+          btn.addEventListener("mouseup", () => {
+            btn.style.background = "var(--theme-colour-input-menu-button-hover)";
+          });
+
+          btnWrap.appendChild(btn);
+          aboutBody.append(line1, line2, line3, btnWrap);
+        }
       }
 
-      window.__ultremeSidebarMenuInstalled = true;
+      W.__ultremeSidebarMenuInstalled = true;
       return true;
     };
 
@@ -1084,7 +1376,7 @@
       if (timeEl) {
         timeEl.onclick = (e) => {
           if (enableDelete && e.shiftKey && author === uid) {
-            window.Umi?.Server?.SendMessage?.(`/delete ${id}`);
+            W.Umi?.Server?.SendMessage?.(`/delete ${id}`);
             return;
           }
           clearSelectedMessage();
@@ -1115,7 +1407,7 @@
         del.className = "delete-button";
         del.innerHTML = "&times;";
         del.title = "Delete this message";
-        del.onclick = () => window.Umi?.Server?.SendMessage?.(`/delete ${id}`);
+        del.onclick = () => W.Umi?.Server?.SendMessage?.(`/delete ${id}`);
         del.style.display = enableDelete && showDeleteButton ? "" : "none";
         btnContainer.appendChild(del);
       }
