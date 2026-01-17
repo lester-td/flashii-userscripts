@@ -1,0 +1,22 @@
+name: mirror from patchii
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"  # every 6 hours
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: mirror repo
+        run: |
+          set -euo pipefail
+          REPO_URL="https://patchii.net/lester/flashii-chat-userscripts.git"
+          git init --bare repo.git
+          cd repo.git
+          git remote add upstream "$REPO_URL"
+          git fetch --prune upstream "+refs/heads/*:refs/remotes/upstream/*" "+refs/tags/*:refs/tags/*"
+          git remote add github "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git push --force github "refs/remotes/upstream/trunk:refs/heads/trunk"
+          git push --force github "refs/tags/*:refs/tags/*"
