@@ -8,29 +8,35 @@ _2. file-upload-progress-bar.user.js_
 
 
 ## Ultreme Script
-Ultreme Script is the all-in-one userscript for Flashii Chat.
+Combines multiple userscripts into an all-in-one userscript for Flashii Chat.
 
-![Preview](docs/settings-page.png)
-
-![Preview](docs/quote-blocks.png)
+![Preview](docs/ss/script-settings.png)
 
 ## Features
 
 ### Quoting
-- Quote button for quick full-message quoting
-- Partial quoting by selecting message text and using the chat quote button
+- Quote buttons on each message
+- Partial quoting by selecting message text and using the Quote button
 - Quote preview above the input before sending
 - Quote blocks with author, avatar, and relative timestamp
 - Jump to the original quoted message from quote links and quote blocks
 - Ctrl+Up / Ctrl+Down keyboard navigation for selecting messages to quote
 
-### Message Tools
-- Delete your own messages with Shift+Click on the timestamp
-- Optional delete button on your own messages
+![Preview](docs/ss/quoting.png)
 
-### Uploads
-- Upload progress bar with inside/outside display options
-- Combined progress tracking for multiple simultaneous uploads
+### Deleting
+- Delete your own messages with Shift+Click on the timestamp
+- Delete button on your own messages
+
+### Upload Progress Bar
+- Upload progress bar with multiple options
+- Choice of a combined progress bar, or a pop up per file upload
+
+![Preview](docs/ss/progress-popup.png)
+![Preview](docs/ss/progress-type1.png)
+![Preview](docs/ss/progress-type2.png)
+![Preview](docs/ss/progress-type3.png)
+![Preview](docs/ss/progress-type4.png)
 
 ### Navigation
 - Flashii logo button that opens the forum
@@ -38,9 +44,11 @@ Ultreme Script is the all-in-one userscript for Flashii Chat.
 ### Media
 - Media viewer for quoted image, video, and audio links
 
+![Preview](docs/ss/media-viewer.png)
+
 ### Script Options
 - Sidebar settings page for toggling features without editing the script
-- Update checker with manual check and in-chat update prompt
+- Update checker with manual check and update prompt
 
 ## Download
 [![Download](docs/ultreme-dl-75.png)](https://patchii.net/lester/flashii-chat-userscripts/raw/branch/trunk/ultreme-script.user.js "Download")
