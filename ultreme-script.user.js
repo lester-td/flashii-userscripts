@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Flashii Chat - Ultreme Script
 // @namespace    https://patchii.net/lester/flashii-chat-userscripts
-// @version      5.4.3
+// @version      5.5
 // @description  Better quotes & delete button, quote blocks, upload progress bar, and Go to Forum button with settings.
 // @author       lester
 // @match        *://chat.flashii.net/*
@@ -30,6 +30,7 @@
   const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
   const DEFAULT_UPLOAD_PROGRESS_BAR_WIDTH = 100;
   const UPLOAD_PROGRESS_BAR_TEXT_PADDING = 16;
+  const UPLOAD_PREVIEW_DURATION_MS = 1500;
   let didAutoUpdateCheck = false;
 
   const loadBoolSetting = (key, def) => {
@@ -76,6 +77,7 @@
     loadBoolSetting("showUploadFileSizeInBar", false) ? "size" : "percent",
     ["percent", "size", "both"],
   );
+  let uploadProgressDisplayMode = loadStringSetting("uploadProgressDisplayMode", "combined", ["combined", "perfile"]);
   let showUploadFileSize = loadBoolSetting("showUploadFileSize", true);
   let enableForumButton = loadBoolSetting("enableForumButton", true);
 
@@ -91,6 +93,8 @@
   const __ultremeXhrMeta = new WeakMap();
   const __ultremeOrigOpen = NativeXHR.prototype.open;
   const __ultremeOrigSend = NativeXHR.prototype.send;
+  let combinedUploadPreviewTimer = null;
+  let perFileUploadPreviewTimer = null;
   const measureUploadProgressTextWidth = (() => {
     let canvas = null;
     let ctx = null;
@@ -104,6 +108,8 @@
   })();
 
   const getMessagesContainer = () => document.getElementById("umi-messages");
+
+  const getUploadPopupRoot = () => document.getElementById("upload-progress-popup");
 
   const getVisibleMessages = () => {
     const container = getMessagesContainer();
@@ -200,9 +206,261 @@
     spoilerBtn.parentElement?.appendChild(wrapper);
   }
 
+  function createUploadPopup() {
+    if (getUploadPopupRoot()) return;
+
+    const popup = document.createElement("div");
+    popup.id = "upload-progress-popup";
+    popup.style.opacity = "0";
+    document.body.appendChild(popup);
+  }
+
+  function fadeInUploadPopup() {
+    const popup = getUploadPopupRoot();
+    if (!popup) return;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (popup.isConnected) popup.style.opacity = "1";
+      });
+    });
+  }
+
   function formatUploadSize(bytes) {
     const mb = bytes / (1024 * 1024);
     return `${mb.toFixed(mb >= 100 ? 0 : mb >= 10 ? 1 : 2)} MB`;
+  }
+
+  function clearCombinedUploadPreview() {
+    if (combinedUploadPreviewTimer) {
+      clearTimeout(combinedUploadPreviewTimer);
+      combinedUploadPreviewTimer = null;
+    }
+
+    if (uploads.size > 0 || uploadProgressDisplayMode !== "combined") return;
+
+    const wrapper = document.getElementById("upload-progress-wrapper");
+    const bar = document.getElementById("upload-progress-bar");
+    const inner = document.getElementById("upload-progress-inner");
+    const text = document.getElementById("upload-progress-text");
+    const sizeLabel = document.getElementById("upload-progress-size");
+    if (!wrapper || !bar || !inner || !text || !sizeLabel) return;
+
+    wrapper.style.opacity = "0";
+    bar.style.width = `${DEFAULT_UPLOAD_PROGRESS_BAR_WIDTH}px`;
+    inner.style.width = "0%";
+    text.textContent = "";
+    sizeLabel.textContent = "";
+  }
+
+  function showCombinedUploadPreview() {
+    if (!enableUploadProgress || uploadProgressDisplayMode !== "combined" || uploads.size > 0) return;
+
+    createProgressBar();
+
+    const wrapper = document.getElementById("upload-progress-wrapper");
+    const bar = document.getElementById("upload-progress-bar");
+    const inner = document.getElementById("upload-progress-inner");
+    const text = document.getElementById("upload-progress-text");
+    const sizeLabel = document.getElementById("upload-progress-size");
+    if (!wrapper || !bar || !inner || !text || !sizeLabel) return;
+
+    const previewPercent = 64;
+    const previewSizeText = "12.4 MB/19.6 MB";
+    const barText =
+      uploadProgressTextMode === "size"
+        ? previewSizeText
+        : uploadProgressTextMode === "both"
+          ? `${previewPercent}%   ${previewSizeText}`
+          : `${previewPercent}%`;
+    const barWidth =
+      uploadProgressTextMode === "percent"
+        ? DEFAULT_UPLOAD_PROGRESS_BAR_WIDTH
+        : Math.max(DEFAULT_UPLOAD_PROGRESS_BAR_WIDTH, measureUploadProgressTextWidth(barText) + UPLOAD_PROGRESS_BAR_TEXT_PADDING);
+
+    wrapper.style.opacity = "1";
+    bar.style.width = `${barWidth}px`;
+    inner.style.width = `${previewPercent}%`;
+    text.textContent = barText;
+    sizeLabel.textContent = previewSizeText;
+    sizeLabel.style.display = uploadProgressTextMode === "percent" && showUploadFileSize ? "" : "none";
+
+    if (combinedUploadPreviewTimer) clearTimeout(combinedUploadPreviewTimer);
+    combinedUploadPreviewTimer = setTimeout(() => {
+      clearCombinedUploadPreview();
+    }, UPLOAD_PREVIEW_DURATION_MS);
+  }
+
+  function getUploadLabel(body, fallbackId) {
+    if (!body || typeof body !== "object") return `Upload ${fallbackId}`;
+
+    try {
+      if (typeof body.entries === "function") {
+        for (const [, value] of body.entries()) {
+          if (typeof File !== "undefined" && value instanceof File && value.name) return value.name;
+        }
+      }
+    } catch {}
+
+    return `Upload ${fallbackId}`;
+  }
+
+  function ensureUploadPopupItem(id, label) {
+    createUploadPopup();
+
+    const popup = getUploadPopupRoot();
+    if (!popup) return null;
+
+    let item = popup.querySelector(`[data-upload-id="${id}"]`);
+    if (item) return item;
+
+    item = document.createElement("div");
+    item.className = "upload-progress-item is-hiding";
+    item.dataset.uploadId = id;
+    item.innerHTML = `
+      <div class="upload-progress-item__header">
+        <div class="upload-progress-item__name"></div>
+        <div class="upload-progress-item__meta"></div>
+      </div>
+      <div class="upload-progress-item__bar">
+        <div class="upload-progress-item__fill"></div>
+      </div>
+      <div class="upload-progress-item__size"></div>
+    `;
+
+    item.querySelector(".upload-progress-item__name").textContent = label;
+    popup.appendChild(item);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (item.isConnected) item.classList.remove("is-hiding");
+      });
+    });
+    return item;
+  }
+
+  function cleanupUploadPopupIfEmpty() {
+    const popup = getUploadPopupRoot();
+    if (!popup) return;
+    if (popup.childElementCount === 0) popup.remove();
+  }
+
+  function removeUploadPopupItem(id) {
+    const popup = getUploadPopupRoot();
+    const item = popup?.querySelector(`[data-upload-id="${id}"]`);
+    if (!item) return;
+    item.classList.add("is-hiding");
+    setTimeout(() => {
+      item.remove();
+      cleanupUploadPopupIfEmpty();
+    }, 150);
+  }
+
+  function clearPerFileUploadPreview() {
+    if (perFileUploadPreviewTimer) {
+      clearTimeout(perFileUploadPreviewTimer);
+      perFileUploadPreviewTimer = null;
+    }
+
+    if (uploads.size > 0 || uploadProgressDisplayMode !== "perfile") return;
+
+    removeUploadPopupItem("__preview__");
+  }
+
+  function showPerFileUploadPreview() {
+    if (!enableUploadProgress || uploadProgressDisplayMode !== "perfile" || uploads.size > 0) return;
+
+    const item = ensureUploadPopupItem("__preview__", "example-image.png");
+    const popup = getUploadPopupRoot();
+    if (!item) return;
+
+    const meta = item.querySelector(".upload-progress-item__meta");
+    const fill = item.querySelector(".upload-progress-item__fill");
+    const size = item.querySelector(".upload-progress-item__size");
+
+    item.classList.remove("is-done");
+    meta.textContent = "64%";
+    size.textContent = "12.4 MB/19.6 MB";
+    fill.style.width = "64%";
+    if (popup) fadeInUploadPopup();
+
+    if (perFileUploadPreviewTimer) clearTimeout(perFileUploadPreviewTimer);
+    perFileUploadPreviewTimer = setTimeout(() => {
+      clearPerFileUploadPreview();
+    }, UPLOAD_PREVIEW_DURATION_MS);
+  }
+
+  function showUploadProgressPreview() {
+    clearCombinedUploadPreview();
+    clearPerFileUploadPreview();
+
+    if (uploadProgressDisplayMode === "perfile") showPerFileUploadPreview();
+    else showCombinedUploadPreview();
+  }
+
+  function updatePerFileProgress() {
+    createUploadPopup();
+
+    const popup = getUploadPopupRoot();
+    if (!popup) return;
+    if (uploads.size > 0) fadeInUploadPopup();
+    else popup.style.opacity = "0";
+
+    for (const [id, upload] of uploads.entries()) {
+      const percent = upload.total === 0 ? 0 : Math.round((upload.loaded / upload.total) * 100);
+      const item = ensureUploadPopupItem(id, upload.label || `Upload ${id}`);
+      if (!item) continue;
+
+      const meta = item.querySelector(".upload-progress-item__meta");
+      const fill = item.querySelector(".upload-progress-item__fill");
+      const size = item.querySelector(".upload-progress-item__size");
+      const name = item.querySelector(".upload-progress-item__name");
+
+      name.textContent = upload.label || `Upload ${id}`;
+      meta.textContent = `${percent}%`;
+      size.textContent = `${formatUploadSize(upload.loaded)}/${formatUploadSize(upload.total)}`;
+      fill.style.width = `${percent}%`;
+      item.classList.toggle("is-done", upload.done);
+
+      if (upload.done) {
+        if (!upload.dismissTimer) {
+          upload.dismissTimer = setTimeout(() => {
+            removeUploadPopupItem(id);
+            uploads.delete(id);
+          }, 1200);
+        }
+      } else if (upload.dismissTimer) {
+        clearTimeout(upload.dismissTimer);
+        upload.dismissTimer = null;
+      }
+    }
+
+    for (const item of [...popup.querySelectorAll(".upload-progress-item")]) {
+      if (!uploads.has(item.dataset.uploadId)) item.remove();
+    }
+
+    cleanupUploadPopupIfEmpty();
+  }
+
+  function refreshUploadProgressUI() {
+    if (!enableUploadProgress) return;
+
+    if (uploadProgressDisplayMode === "perfile") {
+      clearCombinedUploadPreview();
+      document.getElementById("upload-progress-wrapper")?.remove();
+      updatePerFileProgress();
+      return;
+    }
+
+    for (const upload of uploads.values()) {
+      if (upload.dismissTimer) {
+        clearTimeout(upload.dismissTimer);
+        upload.dismissTimer = null;
+      }
+    }
+
+    getUploadPopupRoot()?.remove();
+    clearPerFileUploadPreview();
+    createProgressBar();
+    updateCombinedProgress();
   }
 
   function updateCombinedProgress() {
@@ -279,14 +537,18 @@
           meta.id = Math.random().toString(36).slice(2);
           __ultremeXhrMeta.set(this, meta);
 
-          createProgressBar();
-          uploads.set(meta.id, { loaded: 0, total: 0, done: false });
+          const label = getUploadLabel(arguments[0], meta.id);
+          if (uploadProgressDisplayMode === "combined") createProgressBar();
+          else createUploadPopup();
+          uploads.set(meta.id, { loaded: 0, total: 0, done: false, label, dismissTimer: null });
+          refreshUploadProgressUI();
 
           if (this.upload && this.upload.addEventListener) {
             this.upload.addEventListener("progress", (e) => {
               if (e.lengthComputable) {
-                uploads.set(meta.id, { loaded: e.loaded, total: e.total, done: false });
-                updateCombinedProgress();
+                const current = uploads.get(meta.id) || { label, dismissTimer: null };
+                uploads.set(meta.id, { ...current, loaded: e.loaded, total: e.total, done: false });
+                refreshUploadProgressUI();
               }
             });
           }
@@ -295,7 +557,7 @@
             const current = uploads.get(meta.id);
             if (current) {
               uploads.set(meta.id, { ...current, done: true });
-              updateCombinedProgress();
+              refreshUploadProgressUI();
             }
           });
         }
@@ -306,7 +568,13 @@
   }
 
   function disableUploadProgressUI() {
+    clearCombinedUploadPreview();
+    clearPerFileUploadPreview();
     document.getElementById("upload-progress-wrapper")?.remove();
+    getUploadPopupRoot()?.remove();
+    for (const upload of uploads.values()) {
+      if (upload.dismissTimer) clearTimeout(upload.dismissTimer);
+    }
     uploads.clear();
   }
 
@@ -1267,6 +1535,98 @@
           opacity: 0.55;
           pointer-events: none;
         }
+        .ultreme-setting-subtitle {
+          margin: 8px 0 2px;
+          font-size: 11px;
+          font-weight: bold;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          color: var(--theme-colour-message-time-colour);
+        }
+        .ultreme-setting-subsection {
+          padding-left: 12px;
+          margin-bottom: 6px;
+        }
+        .ultreme-setting-subsection .setting__container:last-child {
+          margin-bottom: 0;
+        }
+        #upload-progress-popup {
+          position: fixed;
+          right: 16px;
+          bottom: 16px;
+          z-index: 9998;
+          width: min(340px, calc(100vw - 32px));
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          pointer-events: none;
+          transition: opacity 0.15s ease;
+        }
+        .upload-progress-item {
+          background: color-mix(in srgb, var(--theme-colour-input-background) 92%, black);
+          border: 1px solid var(--theme-colour-settings-input-border);
+          box-shadow: 0 8px 22px rgba(0, 0, 0, 0.3);
+          border-radius: 4px;
+          padding: 10px;
+          pointer-events: auto;
+          backdrop-filter: blur(6px);
+          font-family: Tahoma, Geneva, Arial, Helvetica, sans-serif;
+          opacity: 1;
+          transition: opacity 0.15s ease;
+        }
+        .upload-progress-item.is-hiding {
+          opacity: 0;
+        }
+        .upload-progress-item__header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 10px;
+          margin-bottom: 8px;
+        }
+        .upload-progress-item__name {
+          min-width: 0;
+          flex: 1 1 auto;
+          font-size: 13px;
+          font-weight: bold;
+          color: var(--theme-colour-main-colour);
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .upload-progress-item__meta,
+        .upload-progress-item__size {
+          font-size: 12px;
+          color: var(--theme-colour-message-time-colour);
+          white-space: nowrap;
+        }
+        .upload-progress-item__bar {
+          position: relative;
+          width: 100%;
+          height: 10px;
+          overflow: hidden;
+          border-radius: 999px;
+          background: var(--theme-colour-input-menu-button);
+          box-shadow: 0 0 0 1px var(--theme-colour-input-menu-box-shadow);
+          margin-bottom: 8px;
+        }
+        .upload-progress-item__fill {
+          height: 100%;
+          width: 0%;
+          background: linear-gradient(
+            90deg,
+            var(--theme-colour-main-accent),
+            var(--theme-colour-input-menu-button-hover)
+          );
+          transition: width 0.15s ease;
+        }
+        .upload-progress-item.is-done .upload-progress-item__fill {
+          background: linear-gradient(
+            90deg,
+            color-mix(in srgb, var(--theme-colour-main-accent) 70%, white),
+            var(--theme-colour-main-accent)
+          );
+        }
       `;
       document.head.appendChild(style);
     };
@@ -1663,6 +2023,21 @@
           return group;
         };
 
+        const createSettingSubsection = (body, titleText) => {
+          const wrap = document.createElement("div");
+
+          const title = document.createElement("div");
+          title.className = "ultreme-setting-subtitle";
+          title.textContent = titleText;
+
+          const group = document.createElement("div");
+          group.className = "ultreme-setting-subsection";
+
+          wrap.append(title, group);
+          body.appendChild(wrap);
+          return { wrap, group };
+        };
+
         const addCheckbox = (body, cls, labelText) => {
           const container = document.createElement("div");
           container.className = "setting__container setting__container--checkbox";
@@ -1759,27 +2134,42 @@
 
         const uploadGroup = createSettingGroup(miscBody, "Upload Progress");
         const enableUploadProgressInput = addCheckbox(uploadGroup, "js-ultreme-enableUploadProgress", "Show upload progress bar");
-        const uploadInsideGroup = createSettingGroup(uploadGroup, "Inside Bar");
-        const uploadProgressPercentInput = addRadio(uploadInsideGroup, "ultreme-upload-progress-text-mode", "js-ultreme-uploadProgressPercent", "Percentage");
-        const uploadProgressSizeInput = addRadio(uploadInsideGroup, "ultreme-upload-progress-text-mode", "js-ultreme-uploadProgressSize", "File size");
-        const uploadProgressBothInput = addRadio(uploadInsideGroup, "ultreme-upload-progress-text-mode", "js-ultreme-uploadProgressBoth", "Both");
-        const uploadOutsideGroup = createSettingGroup(uploadGroup, "Outside Bar");
-        const showUploadFileSizeInput = addCheckbox(uploadOutsideGroup, "js-ultreme-showUploadFileSize", "File size");
+        const uploadDisplaySection = createSettingSubsection(uploadGroup, "Display");
+        const uploadDisplayPerFileInput = addRadio(uploadDisplaySection.group, "ultreme-upload-progress-display-mode", "js-ultreme-uploadProgressDisplayPerFile", "Per-file popup");
+        const uploadDisplayCombinedInput = addRadio(uploadDisplaySection.group, "ultreme-upload-progress-display-mode", "js-ultreme-uploadProgressDisplayCombined", "Combined bar");
+        const uploadInsideSection = createSettingSubsection(uploadGroup, "Inside Bar Text");
+        const uploadProgressPercentInput = addRadio(uploadInsideSection.group, "ultreme-upload-progress-text-mode", "js-ultreme-uploadProgressPercent", "Percentage");
+        const uploadProgressSizeInput = addRadio(uploadInsideSection.group, "ultreme-upload-progress-text-mode", "js-ultreme-uploadProgressSize", "File size");
+        const uploadProgressBothInput = addRadio(uploadInsideSection.group, "ultreme-upload-progress-text-mode", "js-ultreme-uploadProgressBoth", "Both");
+        const uploadOutsideSection = createSettingSubsection(uploadGroup, "Outside Bar Text");
+        const showUploadFileSizeInput = addCheckbox(uploadOutsideSection.group, "js-ultreme-showUploadFileSize", "File size");
 
         const navigationGroup = createSettingGroup(miscBody, "Navigation");
         const enableForumButtonInput = addCheckbox(navigationGroup, "js-ultreme-enableForumButton", "Show Flashii logo (Go to Forum) button");
 
         const syncUploadFileSizeControls = () => {
           const sizeLabel = document.getElementById("upload-progress-size");
-          const disableUploadTextControls = !enableUploadProgress;
-          const disableSideSize = !enableUploadProgress || uploadProgressTextMode !== "percent";
+          const useCombinedBar = enableUploadProgress && uploadProgressDisplayMode === "combined";
+          const disableUploadDisplayControls = !enableUploadProgress;
+          const disableUploadTextControls = !useCombinedBar;
+          const disableSideSize = !useCombinedBar || uploadProgressTextMode !== "percent";
           const sideSizeLabel = showUploadFileSizeInput.closest(".setting__label");
+          const displayModeLabels = [
+            uploadDisplayCombinedInput.closest(".setting__label"),
+            uploadDisplayPerFileInput.closest(".setting__label"),
+          ];
           const uploadTextLabels = [
             uploadProgressPercentInput.closest(".setting__label"),
             uploadProgressSizeInput.closest(".setting__label"),
             uploadProgressBothInput.closest(".setting__label"),
           ];
 
+          for (const input of [uploadDisplayCombinedInput, uploadDisplayPerFileInput]) {
+            input.disabled = disableUploadDisplayControls;
+          }
+          for (const label of displayModeLabels) {
+            label?.classList.toggle("ultreme-setting-disabled", disableUploadDisplayControls);
+          }
           for (const input of [uploadProgressPercentInput, uploadProgressSizeInput, uploadProgressBothInput]) {
             input.disabled = disableUploadTextControls;
           }
@@ -1787,13 +2177,16 @@
             label?.classList.toggle("ultreme-setting-disabled", disableUploadTextControls);
           }
 
-          if (disableUploadTextControls && uploadProgressTextMode !== "percent") {
+          uploadInsideSection.wrap.style.display = uploadProgressDisplayMode === "combined" ? "" : "none";
+          uploadOutsideSection.wrap.style.display = uploadProgressDisplayMode === "combined" ? "" : "none";
+
+          if (!enableUploadProgress && uploadProgressTextMode !== "percent") {
             uploadProgressTextMode = "percent";
             saveStringSetting("uploadProgressTextMode", uploadProgressTextMode);
             uploadProgressPercentInput.checked = true;
           }
 
-          if (disableSideSize && showUploadFileSize) {
+          if ((!enableUploadProgress || (useCombinedBar && uploadProgressTextMode !== "percent")) && showUploadFileSize) {
             showUploadFileSize = false;
             saveBoolSetting("showUploadFileSize", false);
             showUploadFileSizeInput.checked = false;
@@ -1802,7 +2195,7 @@
           showUploadFileSizeInput.disabled = disableSideSize;
           sideSizeLabel?.classList.toggle("ultreme-setting-disabled", disableSideSize);
 
-          if (sizeLabel) sizeLabel.style.display = enableUploadProgress && !disableSideSize && showUploadFileSize ? "" : "none";
+          if (sizeLabel) sizeLabel.style.display = useCombinedBar && !disableSideSize && showUploadFileSize ? "" : "none";
         };
 
         bindCheckboxSetting(showQuoteButtonInput, "showQuoteButton", () => showQuoteButton, (v) => {
@@ -1843,10 +2236,29 @@
           if (!v) {
             disableUploadProgressUI();
           } else {
-            createProgressBar();
+            refreshUploadProgressUI();
+            showUploadProgressPreview();
           }
           syncUploadFileSizeControls();
         });
+
+        bindRadioSetting(
+          {
+            combined: uploadDisplayCombinedInput,
+            perfile: uploadDisplayPerFileInput,
+          },
+          "uploadProgressDisplayMode",
+          () => uploadProgressDisplayMode,
+          (v) => {
+            uploadProgressDisplayMode = v;
+          },
+          () => {
+            if (!enableUploadProgress) return;
+            refreshUploadProgressUI();
+            syncUploadFileSizeControls();
+            showUploadProgressPreview();
+          },
+        );
 
         bindRadioSetting(
           {
@@ -1861,7 +2273,8 @@
           },
           () => {
             syncUploadFileSizeControls();
-            updateCombinedProgress();
+            refreshUploadProgressUI();
+            showUploadProgressPreview();
           },
         );
 
@@ -1869,7 +2282,8 @@
           showUploadFileSize = v;
         }, (v) => {
           const sizeLabel = document.getElementById("upload-progress-size");
-          if (sizeLabel) sizeLabel.style.display = enableUploadProgress && uploadProgressTextMode === "percent" && v ? "" : "none";
+          if (sizeLabel) sizeLabel.style.display = enableUploadProgress && uploadProgressDisplayMode === "combined" && uploadProgressTextMode === "percent" && v ? "" : "none";
+          showUploadProgressPreview();
         });
 
         syncUploadFileSizeControls();
