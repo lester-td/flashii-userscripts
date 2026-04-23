@@ -53,7 +53,7 @@
     const notice = document.createElement("div");
     notice.id = "legacy-script-notice";
     notice.innerHTML =
-      'This script is now deprecated, please download the Ultreme Script from the <a href="' +
+      'The File Upload Progress Bar Userscript by lester is now deprecated. Use the new Ultreme Script Userscript available at the <a href="' +
       PATCHII_PAGE_URL +
       '" target="_blank" rel="noopener noreferrer">Patchii Repo</a>.';
     form.insertBefore(notice, main);
