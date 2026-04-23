@@ -61,10 +61,8 @@
 
   const processedMessages = new WeakSet();
   let mediaModal = null;
-
   const NativeXHR = W.XMLHttpRequest;
   const uploads = new Map();
-
   const __ultremeXhrMeta = new WeakMap();
   const __ultremeOrigOpen = NativeXHR.prototype.open;
   const __ultremeOrigSend = NativeXHR.prototype.send;
@@ -316,38 +314,168 @@
       .trim();
   }
 
+  const getAvatarUrl = (authorId, avatarVersion = null) => {
+    if (!authorId) return DEFAULT_AVATAR_URL;
+    if (avatarVersion) return `${DEFAULT_AVATAR_URL}${authorId}?ver=${avatarVersion}`;
+    return `${DEFAULT_AVATAR_URL}${authorId}`;
+  };
+
+  const parseQuoteHref = (href) => {
+    const m = String(href || "").match(/^#(\d{17})(?::([^:#\s]+))?(?::([^#\s]+))?$/);
+    if (!m) return { messageId: null, authorId: null, avatarVersion: null };
+    return { messageId: m[1], authorId: m[2] || null, avatarVersion: m[3] || null };
+  };
+
+  const extractAvatarVersion = (msg) => {
+    const bg = msg.querySelector(".message__avatar")?.style?.backgroundImage || "";
+    const m = bg.match(/[?&]ver=(\d+)/);
+    return m ? m[1] : null;
+  };
+
+  const VIDEO_EXTS = ["mp4", "webm", "ogg"];
+  const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif", "svg"];
+  const AUDIO_EXTS = ["mp3", "wav", "flac", "aac", "m4a", "opus", "oga"];
+
+  const getMediaKind = (url) => {
+    const cleanUrl = String(url || "").split("#")[0];
+    const extMatch = cleanUrl.split("?")[0].match(/\.([a-z0-9]+)$/i);
+    const ext = extMatch ? extMatch[1].toLowerCase() : "";
+    if (VIDEO_EXTS.includes(ext)) return "video";
+    if (IMAGE_EXTS.includes(ext)) return "image";
+    if (AUDIO_EXTS.includes(ext)) return "audio";
+    return null;
+  };
+
+  const getMediaLabel = (kind) => {
+    if (kind === "image") return "[View Image]";
+    if (kind === "video") return "[View Video]";
+    if (kind === "audio") return "[View Audio]";
+    return null;
+  };
+
+  const escapeHtml = (text) =>
+    String(text || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+
+  const getPreviewMediaLabel = (url, explicitKind = null) => {
+    const kind = explicitKind || getMediaKind(url);
+    return getMediaLabel(kind) || "[View Media]";
+  };
+
+  const buildPreviewMediaLink = (url, explicitKind = null) => {
+    const mediaUrl = String(url || "").trim();
+    const label = getPreviewMediaLabel(mediaUrl, explicitKind);
+    return `<a href="${escapeHtml(mediaUrl)}" class="ultreme-preview-media" data-media-url="${escapeHtml(mediaUrl)}">${escapeHtml(label)}</a>`;
+  };
+
+  const formatQuotePreviewHtml = (msg) => {
+    const placeholders = [];
+    const stash = (html) => {
+      const idx = placeholders.push(html) - 1;
+      return `\uE000${idx}\uE001`;
+    };
+
+    let text = cleanMessage(msg);
+
+    text = text.replace(/\[img\]([\s\S]*?)\[\/img\]/gi, (_, url) => stash(buildPreviewMediaLink(url, "image")));
+    text = text.replace(/\[video\]([\s\S]*?)\[\/video\]/gi, (_, url) => stash(buildPreviewMediaLink(url, "video")));
+    text = text.replace(/\[audio\]([\s\S]*?)\[\/audio\]/gi, (_, url) => stash(buildPreviewMediaLink(url, "audio")));
+    text = text.replace(/\[code\]([\s\S]*?)\[\/code\]/gi, (_, code) => stash(`<code>${escapeHtml(code)}</code>`));
+    text = text.replace(/\[spoiler\]([\s\S]*?)\[\/spoiler\]/gi, (_, spoiler) => stash(`<span class="ultreme-preview-spoiler">${escapeHtml(spoiler)}</span>`));
+    text = text.replace(/\[quote\]([\s\S]*?)\[\/quote\]/gi, "$1");
+
+    text = escapeHtml(text);
+
+    text = text.replace(/\[url=([^\]]+)\]([\s\S]*?)\[\/url\]/gi, "$2");
+    text = text.replace(/\[url\]([\s\S]*?)\[\/url\]/gi, "$1");
+
+    text = text.replace(/\[b\]/gi, "<b>");
+    text = text.replace(/\[\/b\]/gi, "</b>");
+    text = text.replace(/\[i\]/gi, "<i>");
+    text = text.replace(/\[\/i\]/gi, "</i>");
+    text = text.replace(/\[u\]/gi, "<u>");
+    text = text.replace(/\[\/u\]/gi, "</u>");
+    text = text.replace(/\[s\]/gi, "<s>");
+    text = text.replace(/\[\/s\]/gi, "</s>");
+    text = text.replace(/\[color=([^\]]+)\]/gi, (_, color) => {
+      const value = String(color || "").trim();
+      if (/^#(?:[0-9a-f]{3,8})$/i.test(value) || /^var\(--[a-z0-9-]+\)$/i.test(value)) {
+        return `<span style="color:${value};">`;
+      }
+      return "<span>";
+    });
+    text = text.replace(/\[\/color\]/gi, "</span>");
+
+    text = text.replace(/\[(?:\/)?[a-z]+(?:=[^\]]+)?\]/gi, "");
+
+    text = text.replace(/\uE000(\d+)\uE001/g, (_, idx) => placeholders[Number(idx)] || "");
+
+    return text;
+  };
+
+  const closeMediaModal = () => {
+    if (!mediaModal) return;
+    mediaModal.style.display = "none";
+    const content = mediaModal.querySelector(".umi-media-modal-content");
+    const link = mediaModal.querySelector(".umi-media-modal-download");
+    if (content) content.innerHTML = "";
+    if (link) {
+      link.removeAttribute("href");
+      link.removeAttribute("download");
+    }
+  };
+
   function ensureMediaModal() {
     if (mediaModal) return;
     mediaModal = document.createElement("div");
     mediaModal.id = "umi-media-modal";
     mediaModal.innerHTML = `
       <div class="umi-media-modal-backdrop">
-        <div class="umi-media-modal-content"></div>
+        <div class="umi-media-modal-shell">
+          <div class="umi-media-modal-toolbar">
+            <div class="umi-media-modal-title">Ultreme Script Media Viewer</div>
+            <div class="umi-media-modal-actions">
+              <a class="umi-media-modal-download" target="_blank" rel="noopener noreferrer">Download</a>
+              <button type="button" class="umi-media-modal-close" aria-label="Close preview">X</button>
+            </div>
+          </div>
+          <div class="umi-media-modal-content"></div>
+        </div>
       </div>
     `;
-    mediaModal.addEventListener("click", () => {
-      mediaModal.style.display = "none";
-      const content = mediaModal.querySelector(".umi-media-modal-content");
-      if (content) content.innerHTML = "";
+    mediaModal.addEventListener("click", (event) => {
+      if (event.target?.classList?.contains("umi-media-modal-close")) {
+        closeMediaModal();
+        return;
+      }
+
+      if (event.target?.closest?.(".umi-media-modal-toolbar")) return;
+      if (event.target?.closest?.(".umi-media-modal-content img, .umi-media-modal-content video")) return;
+
+      closeMediaModal();
     });
     document.body.appendChild(mediaModal);
   }
 
-  function openMediaModal(url) {
+  async function openMediaModal(url) {
     ensureMediaModal();
     const content = mediaModal.querySelector(".umi-media-modal-content");
+    const downloadLink = mediaModal.querySelector(".umi-media-modal-download");
     if (!content) return;
 
     content.innerHTML = "";
+    if (downloadLink) {
+      downloadLink.href = url;
+      downloadLink.setAttribute("download", "");
+    }
 
-    const cleanUrl = url.split("#")[0];
-    const extMatch = cleanUrl.split("?")[0].match(/\.([a-z0-9]+)$/i);
-    const ext = extMatch ? extMatch[1].toLowerCase() : "";
+    const mediaKind = getMediaKind(url);
 
-    const videoExts = ["mp4", "webm", "ogg"];
-    const imgExts = ["png", "jpg", "jpeg", "gif", "webp"];
-
-    if (videoExts.includes(ext)) {
+    if (mediaKind === "video") {
       const video = document.createElement("video");
       video.src = url;
       video.controls = true;
@@ -356,13 +484,20 @@
       video.style.maxWidth = "100%";
       video.style.maxHeight = "100%";
       content.appendChild(video);
-    } else if (imgExts.includes(ext) || ext === "") {
+    } else if (mediaKind === "image") {
       const img = document.createElement("img");
       img.src = url;
       img.alt = "Media preview";
       img.style.maxWidth = "100%";
       img.style.maxHeight = "100%";
       content.appendChild(img);
+    } else if (mediaKind === "audio") {
+      const audio = document.createElement("audio");
+      audio.src = url;
+      audio.controls = true;
+      audio.autoplay = true;
+      audio.style.width = "min(100%, 640px)";
+      content.appendChild(audio);
     } else {
       W.open(url, "_blank", "noopener,noreferrer");
       return;
@@ -490,54 +625,59 @@
     if (didAutoUpdateCheck) return;
     didAutoUpdateCheck = true;
 
-    const localVer = getInstalledVersion();
-    if (!localVer) return;
+    const updateInfo = await checkForUpdates();
+    if (!updateInfo) return;
 
-    let remoteVer = null;
-    try {
-      remoteVer = await fetchRemoteVersion();
-    } catch {
-      return;
-    }
-    if (!remoteVer) return;
-
-    if (isVersionNewer(remoteVer, localVer)) showAutoUpdatePrompt(remoteVer);
+    if (updateInfo.isNewer) showAutoUpdatePrompt(updateInfo.remoteVer);
   };
 
   const runManualUpdateCheck = async (ui) => {
-    const localVer = getInstalledVersion();
-    if (!localVer) {
-      ui.setStatus("Unable to read installed version.");
-      ui.setUpdateAvailable(false);
-      return;
-    }
-
     ui.setStatus("Checking for updates...");
     ui.setUpdateAvailable(false);
 
-    let remoteVer = null;
-    try {
-      remoteVer = await fetchRemoteVersion();
-    } catch {
+    const updateInfo = await checkForUpdates();
+    if (!updateInfo) {
       ui.setStatus("Update check failed. Please try again.");
       ui.setUpdateAvailable(false);
       return;
     }
 
-    if (!remoteVer) {
+    if (!updateInfo.localVer) {
+      ui.setStatus("Unable to read installed version.");
+      ui.setUpdateAvailable(false);
+      return;
+    }
+
+    if (!updateInfo.remoteVer) {
       ui.setStatus("Unable to determine remote version.");
       ui.setUpdateAvailable(false);
       return;
     }
 
-    if (isVersionNewer(remoteVer, localVer)) {
-      ui.setStatus(`Update available: ${remoteVer}`);
+    if (updateInfo.isNewer) {
+      ui.setStatus(`Update available: ${updateInfo.remoteVer}`);
       ui.setUpdateAvailable(true);
       return;
     }
 
     ui.setStatus(`You're on the latest!`);
     ui.setUpdateAvailable(false);
+  };
+
+  const checkForUpdates = async () => {
+    const localVer = getInstalledVersion();
+    if (!localVer) return { localVer: null, remoteVer: null, isNewer: false };
+
+    try {
+      const remoteVer = await fetchRemoteVersion();
+      return {
+        localVer,
+        remoteVer,
+        isNewer: remoteVer ? isVersionNewer(remoteVer, localVer) : false,
+      };
+    } catch {
+      return null;
+    }
   };
 
   setInterval(() => {
@@ -557,6 +697,13 @@
   document.addEventListener("click", (e) => {
     const t = e.target;
     if (!t || !(t instanceof Element)) return;
+
+    const previewMediaLink = t.closest(".ultreme-preview-media");
+    if (previewMediaLink instanceof HTMLAnchorElement) {
+      e.preventDefault();
+      openMediaModal(previewMediaLink.dataset.mediaUrl || previewMediaLink.href);
+      return;
+    }
 
     if (t.matches("button.markup__button") && t.textContent.trim().toLowerCase() === "quote") {
       setTimeout(() => {
@@ -664,6 +811,25 @@
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: normal;
+        }
+        #quote-preview code {
+          font-family: Consolas, "Courier New", monospace;
+          font-size: 12px;
+          padding: 1px 4px;
+          border-radius: 2px;
+          background: var(--theme-colour-input-menu-button);
+        }
+        #quote-preview .ultreme-preview-media {
+          color: var(--theme-colour-main-accent);
+          text-decoration: underline;
+          cursor: pointer;
+        }
+        #quote-preview .ultreme-preview-spoiler {
+          padding: 0 4px;
+          border-radius: 2px;
+          background: var(--theme-colour-input-menu-button);
+          color: var(--theme-colour-main-colour);
+          filter: brightness(0.8);
         }
         #cancel-quote {
           flex: 0 0 auto;
@@ -839,9 +1005,74 @@
           align-items: center;
           justify-content: center;
         }
+        #umi-media-modal .umi-media-modal-shell {
+          position: relative;
+          width: min(96vw, 1600px);
+          height: min(96vh, 1000px);
+          display: flex;
+          flex-direction: column;
+          align-items: stretch;
+          justify-content: flex-start;
+        }
+        #umi-media-modal .umi-media-modal-toolbar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          width: 100%;
+          box-sizing: border-box;
+          padding: 10px 12px;
+          margin-bottom: 8px;
+          border-radius: 4px;
+          background: rgba(0, 0, 0, 0.72);
+          box-shadow: 0 0 16px rgba(0, 0, 0, 0.45);
+          backdrop-filter: blur(2px);
+        }
+        #umi-media-modal .umi-media-modal-title {
+          color: var(--theme-colour-main-colour);
+          font-size: 13px;
+          font-family: Tahoma, Geneva, Arial, Helvetica, sans-serif;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        #umi-media-modal .umi-media-modal-actions {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 8px;
+          min-width: 0;
+        }
+        #umi-media-modal .umi-media-modal-download,
+        #umi-media-modal .umi-media-modal-close {
+          border: none;
+          border-radius: 2px;
+          padding: 3px 8px;
+          font-size: 13px;
+          cursor: pointer;
+          background: var(--theme-colour-input-menu-button);
+          color: var(--theme-colour-main-colour);
+          text-decoration: none;
+          font-family: Tahoma, Geneva, Arial, Helvetica, sans-serif;
+        }
+        #umi-media-modal .umi-media-modal-download:hover,
+        #umi-media-modal .umi-media-modal-close:hover {
+          background: var(--theme-colour-input-menu-button-hover);
+        }
+        #umi-media-modal .umi-media-modal-download:active,
+        #umi-media-modal .umi-media-modal-close:active {
+          background: var(--theme-colour-input-menu-button-active);
+        }
         #umi-media-modal .umi-media-modal-content {
-          max-width: 90%;
-          max-height: 90%;
+          width: 100%;
+          flex: 1 1 auto;
+          min-height: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 12px;
+          box-sizing: border-box;
+          overflow: hidden;
         }
         #umi-media-modal img,
         #umi-media-modal video {
@@ -849,6 +1080,7 @@
           max-height: 100%;
           display: block;
           box-shadow: 0 0 16px rgba(0, 0, 0, 0.8);
+          object-fit: contain;
         }
         body[data-ultreme-quote-blocks="1"] .ultreme-inline-quote {
           display: none !important;
@@ -879,32 +1111,33 @@
         cancel.textContent = "×";
         cancel.title = "Cancel quote";
         cancel.onclick = () => {
-          pendingQuote = null;
-          preview.remove();
-          clearInterval(previewInterval);
-          clearSelectedMessage();
+          clearPendingQuote();
         };
 
         preview.append(span, cancel);
-
-        const form = document.querySelector("form.input");
-        const main = form?.querySelector(".input__main");
-        if (form && main) form.insertBefore(preview, main);
+        insertBanner(preview);
       }
 
       const span = preview.querySelector("span");
-      const cleanMsg = cleanMessage(msg);
 
       const updateTime = () => {
         const time = getRelativeTime(created);
-        const displayText = smartSlice(cleanMsg, 100, 50, 10);
+        const displayHtml = formatQuotePreviewHtml(msg);
         const showColor = color || DEFAULT_NAME_COLOR;
         const nameHtml = `<b style="color:${showColor};">${name}</b>`;
-        span.innerHTML = `Quoting ${nameHtml} @ ${time} — ${displayText}`;
+        span.innerHTML = `Quoting ${nameHtml} @ ${time} — ${displayHtml}`;
       };
 
       updateTime();
       previewInterval = setInterval(updateTime, 1000);
+    };
+
+    const clearPendingQuote = ({ clearSelection = true } = {}) => {
+      pendingQuote = null;
+      document.getElementById("quote-preview")?.remove();
+      clearInterval(previewInterval);
+      previewInterval = null;
+      if (clearSelection) clearSelectedMessage();
     };
 
     const applyQuote = (messageData) => {
@@ -932,16 +1165,13 @@
         return;
       }
 
-      pendingQuote = null;
-      document.getElementById("quote-preview")?.remove();
-      clearInterval(previewInterval);
+      clearPendingQuote({ clearSelection: false });
     };
 
     const extractMessageData = (msg) => {
       const userEl = msg.querySelector(".message__user");
       const textEl = msg.querySelector(".message__text") || msg.querySelector(".message-tiny-text");
-      const timeEl = msg.querySelector(".message__time");
-      if (!userEl || !textEl || !timeEl) return null;
+      if (!userEl || !textEl) return null;
 
       const dataCreated = msg.getAttribute("data-created");
       const raw = userEl.style?.color;
@@ -949,7 +1179,27 @@
       const name = userEl.textContent?.trim() || "Unknown";
       const msgText = cleanMessage(msg.dataset.body || textEl.textContent?.trim() || "");
 
-      return { name, color: userColor, created: dataCreated, id: msg.dataset.id, msg: msgText };
+      return {
+        name,
+        color: userColor,
+        created: dataCreated,
+        id: msg.dataset.id,
+        authorId: msg.dataset.author,
+        avatarVersion: extractAvatarVersion(msg),
+        msg: msgText,
+      };
+    };
+
+    const appendMessageButton = (container, { className, text, title, visible = true, onClick, html = false }) => {
+      const button = document.createElement("button");
+      button.className = className;
+      if (html) button.innerHTML = text;
+      else button.textContent = text;
+      button.title = title;
+      button.onclick = onClick;
+      button.style.display = visible ? "" : "none";
+      container.appendChild(button);
+      return button;
     };
 
     const enhanceScriptQuote = (msg, textEl) => {
@@ -965,8 +1215,7 @@
       if (aText.length !== 1 || aText.charCodeAt(0) !== 0x200c) return;
 
       const href = anchor.getAttribute("href") || "";
-      const idMatch = href.match(/^#(\d{17})$/);
-      const targetId = idMatch ? idMatch[1] : null;
+      const { messageId: targetId, authorId: quotedAuthorIdFromHref, avatarVersion: quotedAvatarVersion } = parseQuoteHref(href);
 
       const arrowSpan = [...textEl.querySelectorAll("span")].find((s) => (s.textContent || "").includes("└"));
       const br = textEl.querySelector("br");
@@ -986,10 +1235,6 @@
       avatarImg.className = "message__quote-avatar";
       avatarImg.alt = "";
       avatarImg.src = DEFAULT_AVATAR_URL;
-
-      if (targetMsg?.dataset?.author) {
-        avatarImg.src = `https://flashii.net/assets/avatar/${targetMsg.dataset.author}`;
-      }
 
       let quotedName = "Unknown";
       let quotedColor = null;
@@ -1027,6 +1272,12 @@
         }
       }
 
+      const quotedAuthorId = targetMsg?.dataset?.author || quotedAuthorIdFromHref;
+      const quotedAvatarVersionLive = targetMsg ? extractAvatarVersion(targetMsg) : null;
+      if (quotedAuthorId) {
+        avatarImg.src = getAvatarUrl(quotedAuthorId, quotedAvatarVersionLive || quotedAvatarVersion);
+      }
+
       if (!relTime && quotedCreated) relTime = getRelativeTime(quotedCreated);
 
       const body = document.createElement("div");
@@ -1062,15 +1313,34 @@
           let url = match[0];
           if (!/^https?:\/\//i.test(url)) url = "https:" + url;
 
-          const link = document.createElement("a");
-          link.href = url;
-          link.textContent = "Media...";
-          link.className = "message__quote-media";
-          link.addEventListener("click", (ev) => {
-            ev.preventDefault();
-            openMediaModal(url);
-          });
-          textDiv.appendChild(link);
+          const trailingWhitespace = url.match(/\s+$/)?.[0] || "";
+          if (trailingWhitespace) {
+            url = url.slice(0, -trailingWhitespace.length);
+          }
+
+          const mediaKind = getMediaKind(url);
+          if (mediaKind) {
+            const link = document.createElement("a");
+            link.href = url;
+            link.textContent = getMediaLabel(mediaKind);
+            link.className = "message__quote-media";
+            link.addEventListener("click", (ev) => {
+              ev.preventDefault();
+              openMediaModal(url);
+            });
+            textDiv.appendChild(link);
+          } else {
+            const link = document.createElement("a");
+            link.href = url;
+            link.textContent = match[0];
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            textDiv.appendChild(link);
+          }
+
+          if (trailingWhitespace) {
+            textDiv.appendChild(document.createTextNode(trailingWhitespace));
+          }
 
           lastIndex = urlEnd;
         }
@@ -1222,6 +1492,16 @@
           return input;
         };
 
+        const bindCheckboxSetting = (input, key, getValue, setValue, onChange) => {
+          input.checked = getValue();
+          input.addEventListener("change", () => {
+            const nextValue = input.checked;
+            setValue(nextValue);
+            saveBoolSetting(key, nextValue);
+            onChange?.(nextValue);
+          });
+        };
+
         const createButtonRow = (body, text, onClick) => {
           const wrap = document.createElement("div");
           wrap.className = "setting__container setting__container--button";
@@ -1250,58 +1530,48 @@
         const enableUploadProgressInput = addCheckbox(miscBody, "js-ultreme-enableUploadProgress", "Show upload progress bar");
         const enableForumButtonInput = addCheckbox(miscBody, "js-ultreme-enableForumButton", "Show Flashii logo (Go to Forum) button");
 
-        showQuoteButtonInput.checked = showQuoteButton;
-        showGotoButtonInput.checked = showGotoButton;
-        enableQuoteBlocksInput.checked = enableQuoteBlocks;
-        enableDeleteInput.checked = enableDelete;
-        showDeleteButtonInput.checked = showDeleteButton;
-        enableUploadProgressInput.checked = enableUploadProgress;
-        enableForumButtonInput.checked = enableForumButton;
-
-        showQuoteButtonInput.addEventListener("change", () => {
-          showQuoteButton = showQuoteButtonInput.checked;
-          saveBoolSetting("showQuoteButton", showQuoteButton);
-          document.querySelectorAll(".quote-button").forEach((btn) => (btn.style.display = showQuoteButton ? "" : "none"));
+        bindCheckboxSetting(showQuoteButtonInput, "showQuoteButton", () => showQuoteButton, (v) => {
+          showQuoteButton = v;
+        }, (v) => {
+          document.querySelectorAll(".quote-button").forEach((btn) => (btn.style.display = v ? "" : "none"));
         });
 
-        showGotoButtonInput.addEventListener("change", () => {
-          showGotoButton = showGotoButtonInput.checked;
-          saveBoolSetting("showGotoButton", showGotoButton);
-          document.querySelectorAll(".goto-button").forEach((btn) => (btn.style.display = showGotoButton ? "" : "none"));
+        bindCheckboxSetting(showGotoButtonInput, "showGotoButton", () => showGotoButton, (v) => {
+          showGotoButton = v;
+        }, (v) => {
+          document.querySelectorAll(".goto-button").forEach((btn) => (btn.style.display = v ? "" : "none"));
         });
 
-        enableQuoteBlocksInput.addEventListener("change", () => {
-          enableQuoteBlocks = enableQuoteBlocksInput.checked;
-          saveBoolSetting("enableQuoteBlocks", enableQuoteBlocks);
-          document.body.dataset.ultremeQuoteBlocks = enableQuoteBlocks ? "1" : "0";
+        bindCheckboxSetting(enableQuoteBlocksInput, "enableQuoteBlocks", () => enableQuoteBlocks, (v) => {
+          enableQuoteBlocks = v;
+        }, (v) => {
+          document.body.dataset.ultremeQuoteBlocks = v ? "1" : "0";
         });
 
-        enableDeleteInput.addEventListener("change", () => {
-          enableDelete = enableDeleteInput.checked;
-          saveBoolSetting("enableDelete", enableDelete);
+        const syncDeleteButtons = () => {
           document.querySelectorAll(".delete-button").forEach((btn) => {
             btn.style.display = enableDelete && showDeleteButton ? "" : "none";
           });
+        };
+
+        bindCheckboxSetting(enableDeleteInput, "enableDelete", () => enableDelete, (v) => {
+          enableDelete = v;
+        }, syncDeleteButtons);
+
+        bindCheckboxSetting(showDeleteButtonInput, "showDeleteButton", () => showDeleteButton, (v) => {
+          showDeleteButton = v;
+        }, syncDeleteButtons);
+
+        bindCheckboxSetting(enableUploadProgressInput, "enableUploadProgress", () => enableUploadProgress, (v) => {
+          enableUploadProgress = v;
+        }, (v) => {
+          if (!v) disableUploadProgressUI();
         });
 
-        showDeleteButtonInput.addEventListener("change", () => {
-          showDeleteButton = showDeleteButtonInput.checked;
-          saveBoolSetting("showDeleteButton", showDeleteButton);
-          document.querySelectorAll(".delete-button").forEach((btn) => {
-            btn.style.display = enableDelete && showDeleteButton ? "" : "none";
-          });
-        });
-
-        enableUploadProgressInput.addEventListener("change", () => {
-          enableUploadProgress = enableUploadProgressInput.checked;
-          saveBoolSetting("enableUploadProgress", enableUploadProgress);
-          if (!enableUploadProgress) disableUploadProgressUI();
-        });
-
-        enableForumButtonInput.addEventListener("change", () => {
-          enableForumButton = enableForumButtonInput.checked;
-          saveBoolSetting("enableForumButton", enableForumButton);
-          if (enableForumButton) addForumButton();
+        bindCheckboxSetting(enableForumButtonInput, "enableForumButton", () => enableForumButton, (v) => {
+          enableForumButton = v;
+        }, (v) => {
+          if (v) addForumButton();
           else removeForumButton();
         });
 
@@ -1354,25 +1624,20 @@
       if (processedMessages.has(msg)) return;
       processedMessages.add(msg);
 
-      const inputEl = document.querySelector("textarea.input__text");
-      if (!inputEl) return;
+      if (!document.querySelector("textarea.input__text")) return;
 
-      const id = msg.dataset.id;
+      const messageData = extractMessageData(msg);
+      if (!messageData) return;
+
+      const { id, name, color: userColor, created: dataCreated, authorId, avatarVersion, msg: msgText } = messageData;
       const author = msg.dataset.author;
       const bodyText = msg.dataset.body || "";
 
       if (["has disconnected", "has joined"].some((p) => bodyText.includes(p))) return;
 
       const textEl = msg.querySelector(".message__text") || msg.querySelector(".message-tiny-text");
-      const userEl = msg.querySelector(".message__user");
       const timeEl = msg.querySelector(".message__time");
-      if (!textEl || !userEl) return;
-
-      const dataCreated = msg.getAttribute("data-created");
-      const raw = userEl.style?.color;
-      const userColor = !raw || raw === "inherit" ? null : rgbToHex(raw);
-      const name = userEl.textContent?.trim() || "Unknown";
-      const msgText = cleanMessage(msg.dataset.body || textEl.textContent?.trim() || "");
+      if (!textEl) return;
 
       if (timeEl) {
         timeEl.onclick = (e) => {
@@ -1382,7 +1647,7 @@
           }
           clearSelectedMessage();
           msg.classList.add("selected-quote");
-          applyQuote({ name, color: userColor, created: dataCreated, id, msg: msgText });
+          applyQuote({ name, color: userColor, created: dataCreated, id, authorId, avatarVersion, msg: msgText });
         };
       }
 
@@ -1390,8 +1655,8 @@
       if (relTimeEl) {
         relTimeEl.onclick = () => {
           const a = textEl.querySelector('a[href^="#"]');
-          const idMatch = a?.getAttribute("href")?.match(/^#(\d{17})$/);
-          if (idMatch) scrollToMessageId(idMatch[1]);
+          const { messageId } = parseQuoteHref(a?.getAttribute("href"));
+          if (messageId) scrollToMessageId(messageId);
         };
       }
 
@@ -1404,41 +1669,41 @@
       }
 
       if (!msg.querySelector(".delete-button") && author === uid) {
-        const del = document.createElement("button");
-        del.className = "delete-button";
-        del.innerHTML = "&times;";
-        del.title = "Delete this message";
-        del.onclick = () => W.Umi?.Server?.SendMessage?.(`/delete ${id}`);
-        del.style.display = enableDelete && showDeleteButton ? "" : "none";
-        btnContainer.appendChild(del);
+        appendMessageButton(btnContainer, {
+          className: "delete-button",
+          text: "&times;",
+          title: "Delete this message",
+          visible: enableDelete && showDeleteButton,
+          onClick: () => W.Umi?.Server?.SendMessage?.(`/delete ${id}`),
+          html: true,
+        });
       }
 
       if (!msg.querySelector(".quote-button")) {
-        const btn = document.createElement("button");
-        btn.className = "quote-button";
-        btn.textContent = "Quote";
-        btn.title = "Quote this message";
-        btn.onclick = () => {
-          clearSelectedMessage();
-          msg.classList.add("selected-quote");
-          applyQuote({ name, color: userColor, created: dataCreated, id, msg: msgText });
-        };
-        btn.style.display = showQuoteButton ? "" : "none";
-        btnContainer.appendChild(btn);
+        appendMessageButton(btnContainer, {
+          className: "quote-button",
+          text: "Quote",
+          title: "Quote this message",
+          visible: showQuoteButton,
+          onClick: () => {
+            clearSelectedMessage();
+            msg.classList.add("selected-quote");
+            applyQuote({ name, color: userColor, created: dataCreated, id, authorId, avatarVersion, msg: msgText });
+          },
+        });
       }
 
       if (!msg.querySelector(".goto-button")) {
         const a = textEl.querySelector('a[href^="#"]');
-        const idMatch = a?.getAttribute("href")?.match(/^#(\d{17})$/);
-        if (idMatch) {
-          const targetId = idMatch[1];
-          const go = document.createElement("button");
-          go.className = "goto-button";
-          go.textContent = "Go to quoted";
-          go.title = "Scroll to quoted message";
-          go.onclick = () => scrollToMessageId(targetId);
-          go.style.display = showGotoButton ? "" : "none";
-          btnContainer.appendChild(go);
+        const { messageId: targetId } = parseQuoteHref(a?.getAttribute("href"));
+        if (targetId) {
+          appendMessageButton(btnContainer, {
+            className: "goto-button",
+            text: "Go to quoted",
+            title: "Scroll to quoted message",
+            visible: showGotoButton,
+            onClick: () => scrollToMessageId(targetId),
+          });
         }
       }
 
@@ -1477,25 +1742,24 @@
         () => {
           if (!pendingQuote) return;
 
-          const { name, color, id, msg, created } = pendingQuote;
+          const { name, color, id, authorId, avatarVersion, msg, created } = pendingQuote;
           const hidden = "\u200C";
           const cleanMsg = cleanMessage(msg);
           const time = getRelativeTime(created);
           const storedText = smartSlice(cleanMsg, 100, 50, 10);
 
           const nameColor = color || DEFAULT_NAME_COLOR;
+          const quoteHref = authorId
+            ? `#${id}:${authorId}${avatarVersion ? `:${avatarVersion}` : ""}`
+            : `#${id}`;
 
-          const quoteBlock = `[i][color=${nameColor}][b]${name}[/b][/color] [color=var(--theme-colour-message-time-colour)]@ ${time} —[/color][/i][url=#${id}]${hidden}[/url][quote]${storedText}[/quote]`;
+          const quoteBlock = `[i][color=${nameColor}][b]${name}[/b][/color] [color=var(--theme-colour-message-time-colour)]@ ${time} —[/color][/i][url=${quoteHref}]${hidden}[/url][quote]${storedText}[/quote]`;
 
           const userText = (input.value || "").replace(/^[ \t]+/, "");
           const full = `${quoteBlock}${userText ? `\n[color=var(--theme-colour-message-time-colour)]└─ [/color]${userText}` : ""}`;
 
           input.value = full;
-          pendingQuote = null;
-
-          document.getElementById("quote-preview")?.remove();
-          clearInterval(previewInterval);
-          clearSelectedMessage();
+          clearPendingQuote();
         },
         true,
       );
@@ -1504,10 +1768,7 @@
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && pendingQuote) {
         e.preventDefault();
-        pendingQuote = null;
-        clearSelectedMessage();
-        document.getElementById("quote-preview")?.remove();
-        clearInterval(previewInterval);
+        clearPendingQuote();
         return;
       }
 
