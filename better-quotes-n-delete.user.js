@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Flashii Chat - Better Quotes & Delete Button
 // @namespace    https://patchii.net/lester/flashii-chat-userscripts
-// @version      4.4
+// @version      4.4.1
 // @description  Adds message quoting and preview, quote blocks, media viewer, and delete button to own messages.
 // @author       lester
 // @match        *://chat.flashii.net/*
@@ -119,10 +119,66 @@
   };
 
   const getMediaLabel = (kind) => {
-    if (kind === "image") return "[View Image]";
-    if (kind === "video") return "[View Video]";
-    if (kind === "audio") return "[View Audio]";
+    if (kind === "image") return "View Image";
+    if (kind === "video") return "View Video";
+    if (kind === "audio") return "View Audio";
     return null;
+  };
+
+  const createQuoteEmbedToggle = (url, mediaKind) => {
+    const wrapper = document.createElement("span");
+    wrapper.className = "message__quote-embed-wrap";
+
+    const toggle = document.createElement("a");
+    toggle.href = "#";
+    toggle.textContent = "Embed";
+    toggle.className = "message__quote-embed-toggle";
+
+    const embed = document.createElement("div");
+    embed.className = "message__quote-embed";
+    embed.style.display = "none";
+
+    const appendMedia = () => {
+      if (embed.childElementCount > 0) return;
+
+      if (mediaKind === "video") {
+        const video = document.createElement("video");
+        video.src = url;
+        video.controls = true;
+        video.preload = "metadata";
+        embed.appendChild(video);
+      } else if (mediaKind === "audio") {
+        const audio = document.createElement("audio");
+        audio.src = url;
+        audio.controls = true;
+        audio.preload = "metadata";
+        embed.appendChild(audio);
+      } else {
+        const img = document.createElement("img");
+        img.src = url;
+        img.alt = "Embedded media";
+        img.loading = "lazy";
+        embed.appendChild(img);
+      }
+    };
+
+    toggle.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const isOpen = embed.style.display !== "none";
+      if (isOpen) {
+        embed.style.display = "none";
+        toggle.textContent = "Embed";
+        return;
+      }
+
+      appendMedia();
+      embed.style.display = "";
+      toggle.textContent = "Remove";
+    });
+
+    wrapper.append(document.createTextNode("["), toggle, document.createTextNode("]"), embed);
+    return wrapper;
   };
 
   const escapeHtml = (text) =>
@@ -135,13 +191,13 @@
 
   const getPreviewMediaLabel = (url, explicitKind = null) => {
     const kind = explicitKind || getMediaKind(url);
-    return getMediaLabel(kind) || "[View Media]";
+    return getMediaLabel(kind) || "View Media";
   };
 
   const buildPreviewMediaLink = (url, explicitKind = null) => {
     const mediaUrl = String(url || "").trim();
     const label = getPreviewMediaLabel(mediaUrl, explicitKind);
-    return `<a href="${escapeHtml(mediaUrl)}" class="ultreme-preview-media" data-media-url="${escapeHtml(mediaUrl)}">${escapeHtml(label)}</a>`;
+    return `(<a href="${escapeHtml(mediaUrl)}" class="ultreme-preview-media" data-media-url="${escapeHtml(mediaUrl)}">${escapeHtml(label)}</a>)`;
   };
 
   const formatQuotePreviewHtml = (msg) => {
@@ -531,7 +587,25 @@
           color: var(--theme-colour-main-accent);
           text-decoration: underline;
           cursor: pointer;
-          margin-right: 4px;
+        }
+        .message__quote-text .message__quote-embed-toggle {
+          color: var(--theme-colour-main-accent);
+          text-decoration: underline;
+          cursor: pointer;
+        }
+        .message__quote-embed {
+          margin-top: 6px;
+        }
+        .message__quote-embed img,
+        .message__quote-embed video {
+          max-width: min(100%, 420px);
+          max-height: 240px;
+          display: block;
+          border-radius: 3px;
+        }
+        .message__quote-embed audio {
+          width: min(100%, 420px);
+          display: block;
         }
         .message__quote + .message__text {
           display: block;
@@ -855,6 +929,7 @@
 
           const mediaKind = getMediaKind(url);
           if (mediaKind) {
+            textDiv.appendChild(document.createTextNode("("));
             const link = document.createElement("a");
             link.href = url;
             link.textContent = getMediaLabel(mediaKind);
@@ -864,6 +939,8 @@
               openMediaModal(url);
             });
             textDiv.appendChild(link);
+            textDiv.appendChild(document.createTextNode(") "));
+            textDiv.appendChild(createQuoteEmbedToggle(url, mediaKind));
           } else {
             const link = document.createElement("a");
             link.href = url;
@@ -919,7 +996,7 @@
 
       if (targetId) {
         quoteContainer.addEventListener("click", (ev) => {
-          if (ev.target?.closest?.(".message__quote-media")) return;
+          if (ev.target?.closest?.(".message__quote-media, .message__quote-embed-toggle, .message__quote-embed")) return;
           scrollToMessageId(targetId);
         });
       }
