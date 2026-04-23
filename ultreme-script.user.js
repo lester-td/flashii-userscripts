@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Flashii Chat - Ultreme Script
 // @namespace    https://patchii.net/lester/flashii-chat-userscripts
-// @version      5.5.1
+// @version      5.5.2
 // @description  Better quotes & delete button, quote blocks, upload progress bar, and Go to Forum button with settings.
 // @author       lester
 // @match        *://chat.flashii.net/*
@@ -71,6 +71,7 @@
   let enableDelete = loadBoolSetting("enableDelete", true);
   let showDeleteButton = loadBoolSetting("showDeleteButton", true);
   let enableQuoteBlocks = loadBoolSetting("enableQuoteBlocks", true);
+  let interceptNativeQuoteButton = loadBoolSetting("interceptNativeQuoteButton", true);
   let enableUploadProgress = loadBoolSetting("enableUploadProgress", true);
   let uploadProgressTextMode = loadStringSetting(
     "uploadProgressTextMode",
@@ -82,6 +83,7 @@
   let enableForumButton = loadBoolSetting("enableForumButton", true);
 
   let selectedText = "";
+  let selectedQuoteData = null;
   let pendingQuote = null;
   let previewInterval = null;
   let selectedMessageIndex = -1;
@@ -115,6 +117,39 @@
     const container = getMessagesContainer();
     if (!container) return [];
     return [...container.children].filter((msg) => msg.classList.contains("message"));
+  };
+
+  const rgbToHex = (rgb) => {
+    const m = rgb?.match(/\d+/g);
+    return m?.length >= 3
+      ? "#" +
+          m
+            .slice(0, 3)
+            .map((x) => (+x).toString(16).padStart(2, "0"))
+            .join("")
+      : "#000";
+  };
+
+  const buildQuoteDataFromMessageElement = (msg, overrideText = null) => {
+    const userEl = msg?.querySelector(".message__user");
+    const textEl = msg?.querySelector(".message__text") || msg?.querySelector(".message-tiny-text");
+    if (!msg || !userEl || !textEl) return null;
+
+    const dataCreated = msg.getAttribute("data-created");
+    const raw = userEl.style?.color;
+    const userColor = !raw || raw === "inherit" ? null : rgbToHex(raw);
+    const name = userEl.textContent?.trim() || "Unknown";
+    const msgText = typeof overrideText === "string" ? overrideText.trim() : cleanMessage(msg.dataset.body || textEl.textContent?.trim() || "");
+
+    return {
+      name,
+      color: userColor,
+      created: dataCreated,
+      id: msg.dataset.id,
+      authorId: msg.dataset.author,
+      avatarVersion: extractAvatarVersion(msg),
+      msg: msgText,
+    };
   };
 
   const scrollToMessageId = (targetId) => {
@@ -1097,7 +1132,17 @@
     const inside =
       range?.commonAncestorContainer?.closest?.("#umi-messages") ||
       range?.commonAncestorContainer?.parentElement?.closest?.("#umi-messages");
-    if (inside) selectedText = sel.toString().trim();
+    if (!inside) {
+      selectedText = "";
+      selectedQuoteData = null;
+      return;
+    }
+
+    selectedText = sel.toString().trim();
+    const sourceMessage =
+      range?.commonAncestorContainer?.closest?.(".message") ||
+      range?.commonAncestorContainer?.parentElement?.closest?.(".message");
+    selectedQuoteData = selectedText && sourceMessage ? buildQuoteDataFromMessageElement(sourceMessage, selectedText) : null;
   });
 
   document.addEventListener("click", (e) => {
@@ -1111,7 +1156,7 @@
       return;
     }
 
-    if (t.matches("button.markup__button") && t.textContent.trim().toLowerCase() === "quote") {
+    if (!interceptNativeQuoteButton && t.matches("button.markup__button") && t.textContent.trim().toLowerCase() === "quote") {
       setTimeout(() => {
         const input = document.querySelector("textarea.input__text");
         if (input && selectedText) {
@@ -1119,10 +1164,28 @@
           input.value = input.value.trim() === "[quote][/quote]" ? quoted : input.value + quoted;
           input.focus();
           selectedText = "";
+          selectedQuoteData = null;
         }
       }, 50);
     }
+
   });
+
+  document.addEventListener(
+    "click",
+    (e) => {
+      const t = e.target;
+      if (!(t instanceof Element)) return;
+      if (!interceptNativeQuoteButton || !selectedQuoteData) return;
+      if (!t.matches("button.markup__button") || t.textContent.trim().toLowerCase() !== "quote") return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation?.();
+      document.dispatchEvent(new CustomEvent("ultreme:apply-selected-quote"));
+    },
+    true,
+  );
 
   W.addEventListener("umi:connect", () => {
     const uid = W.Umi?.User?.getCurrentUser?.()?.id;
@@ -1131,17 +1194,6 @@
     runAutoUpdateCheckOnce();
 
     document.body.dataset.ultremeQuoteBlocks = enableQuoteBlocks ? "1" : "0";
-
-    const rgbToHex = (rgb) => {
-      const m = rgb?.match(/\d+/g);
-      return m?.length >= 3
-        ? "#" +
-            m
-              .slice(0, 3)
-              .map((x) => (+x).toString(16).padStart(2, "0"))
-              .join("")
-        : "#000";
-    };
 
     const getRelativeTime = (dateString) => {
       if (!dateString) return "";
@@ -1676,6 +1728,8 @@
 
     const applyQuote = (messageData) => {
       pendingQuote = messageData;
+      selectedText = "";
+      selectedQuoteData = null;
       showQuotePreview(pendingQuote);
       document.querySelector("textarea.input__text")?.focus();
     };
@@ -1702,27 +1756,7 @@
       clearPendingQuote({ clearSelection: false });
     };
 
-    const extractMessageData = (msg) => {
-      const userEl = msg.querySelector(".message__user");
-      const textEl = msg.querySelector(".message__text") || msg.querySelector(".message-tiny-text");
-      if (!userEl || !textEl) return null;
-
-      const dataCreated = msg.getAttribute("data-created");
-      const raw = userEl.style?.color;
-      const userColor = !raw || raw === "inherit" ? null : rgbToHex(raw);
-      const name = userEl.textContent?.trim() || "Unknown";
-      const msgText = cleanMessage(msg.dataset.body || textEl.textContent?.trim() || "");
-
-      return {
-        name,
-        color: userColor,
-        created: dataCreated,
-        id: msg.dataset.id,
-        authorId: msg.dataset.author,
-        avatarVersion: extractAvatarVersion(msg),
-        msg: msgText,
-      };
-    };
+    const extractMessageData = (msg) => buildQuoteDataFromMessageElement(msg);
 
     const appendMessageButton = (container, { className, text, title, visible = true, onClick, html = false }) => {
       const button = document.createElement("button");
@@ -2127,6 +2161,7 @@
         const showQuoteButtonInput = addCheckbox(quotingBody, "js-ultreme-showQuoteButton", 'Show "Quote" button');
         const showGotoButtonInput = addCheckbox(quotingBody, "js-ultreme-showGotoButton", 'Show "Go to quote" button');
         const enableQuoteBlocksInput = addCheckbox(quotingBody, "js-ultreme-enableQuoteBlocks", "Render quotes as blocks");
+        const interceptNativeQuoteButtonInput = addCheckbox(quotingBody, "js-ultreme-interceptNativeQuoteButton", 'Rich partial quotes with bbcode "Quote" button');
 
         addHint(deletingBody, "Hold shift and click your message's timestamp to delete");
         const enableDeleteInput = addCheckbox(deletingBody, "js-ultreme-enableDelete", "Enable Delete");
@@ -2214,6 +2249,10 @@
           enableQuoteBlocks = v;
         }, (v) => {
           document.body.dataset.ultremeQuoteBlocks = v ? "1" : "0";
+        });
+
+        bindCheckboxSetting(interceptNativeQuoteButtonInput, "interceptNativeQuoteButton", () => interceptNativeQuoteButton, (v) => {
+          interceptNativeQuoteButton = v;
         });
 
         const syncDeleteButtons = () => {
@@ -2408,7 +2447,11 @@
           onClick: () => {
             clearSelectedMessage();
             msg.classList.add("selected-quote");
-            applyQuote({ name, color: userColor, created: dataCreated, id, authorId, avatarVersion, msg: msgText });
+            const quoteData =
+              selectedQuoteData && selectedQuoteData.id === id && selectedQuoteData.msg
+                ? { ...selectedQuoteData }
+                : { name, color: userColor, created: dataCreated, id, authorId, avatarVersion, msg: msgText };
+            applyQuote(quoteData);
           },
         });
       }
@@ -2447,6 +2490,14 @@
     installMenuRetry();
     processNewMessages();
     addForumButton();
+
+    if (!document.__ultremeSelectedQuoteHookInstalled) {
+      document.__ultremeSelectedQuoteHookInstalled = true;
+      document.addEventListener("ultreme:apply-selected-quote", () => {
+        if (!selectedQuoteData) return;
+        applyQuote(selectedQuoteData);
+      });
+    }
 
     const container = getMessagesContainer();
     if (container) new MutationObserver(processNewMessages).observe(container, { childList: true });
