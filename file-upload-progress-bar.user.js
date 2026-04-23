@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Flashii Chat - File Upload Progress Bar
 // @namespace    https://patchii.net/lester/flashii-chat-userscripts
-// @version      1.4
+// @version      1.4.1
 // @description  Show progress bar for file uploads in chat.
 // @author       lester
 // @match        *://chat.flashii.net/*
@@ -46,6 +46,15 @@
       font-size: 13px;
     `;
 
+    const sizeLabel = document.createElement("span");
+    sizeLabel.id = "upload-progress-size";
+    sizeLabel.style.cssText = `
+      color: var(--theme-colour-main-colour);
+      font-size: 12px;
+      min-width: 120px;
+      white-space: nowrap;
+    `;
+
     const barContainer = document.createElement("div");
     barContainer.style.cssText = `
       position: relative;
@@ -74,8 +83,13 @@
     `;
 
     barContainer.appendChild(inner);
-    wrapper.append(label, barContainer);
+    wrapper.append(label, barContainer, sizeLabel);
     spoilerBtn.parentElement?.appendChild(wrapper);
+  }
+
+  function formatUploadSize(bytes) {
+    const mb = bytes / (1024 * 1024);
+    return `${mb.toFixed(mb >= 100 ? 0 : mb >= 10 ? 1 : 2)} MB`;
   }
 
   function updateCombinedProgress() {
@@ -92,11 +106,13 @@
     const percent = totalSize === 0 ? 0 : Math.round((totalLoaded / totalSize) * 100);
     const wrapper = document.getElementById("upload-progress-wrapper");
     const inner = document.getElementById("upload-progress-inner");
-    if (!wrapper || !inner) return;
+    const sizeLabel = document.getElementById("upload-progress-size");
+    if (!wrapper || !inner || !sizeLabel) return;
 
     wrapper.style.opacity = "1";
     inner.style.width = `${percent}%`;
     inner.textContent = `${percent}%`;
+    sizeLabel.textContent = `${formatUploadSize(totalLoaded)}/${formatUploadSize(totalSize)}`;
 
     if (allDone) {
       setTimeout(() => {
@@ -104,6 +120,7 @@
         setTimeout(() => {
           inner.style.width = "0%";
           inner.textContent = "";
+          sizeLabel.textContent = "";
           uploads.clear();
         }, 150);
       }, 800);

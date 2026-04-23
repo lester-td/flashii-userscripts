@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Flashii Chat - Ultreme Script
 // @namespace    https://patchii.net/lester/flashii-chat-userscripts
-// @version      5.4.1
+// @version      5.4.2
 // @description  Better quotes & delete button, quote blocks, upload progress bar, and Go to Forum button with settings.
 // @author       lester
 // @match        *://chat.flashii.net/*
@@ -28,6 +28,8 @@
   const PATCHII_META_URL = "https://patchii.net/lester/flashii-chat-userscripts/raw/branch/trunk/ultreme-script.meta.js";
 
   const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+  const DEFAULT_UPLOAD_PROGRESS_BAR_WIDTH = 100;
+  const UPLOAD_PROGRESS_BAR_TEXT_PADDING = 16;
   let didAutoUpdateCheck = false;
 
   const loadBoolSetting = (key, def) => {
@@ -46,12 +48,35 @@
     } catch {}
   };
 
+  const loadStringSetting = (key, def, allowed = null) => {
+    try {
+      const v = localStorage.getItem(STORAGE_PREFIX + key);
+      if (v === null) return def;
+      if (allowed && !allowed.includes(v)) return def;
+      return v;
+    } catch {
+      return def;
+    }
+  };
+
+  const saveStringSetting = (key, val) => {
+    try {
+      localStorage.setItem(STORAGE_PREFIX + key, val);
+    } catch {}
+  };
+
   let showQuoteButton = loadBoolSetting("showQuoteButton", true);
   let showGotoButton = loadBoolSetting("showGotoButton", true);
   let enableDelete = loadBoolSetting("enableDelete", true);
   let showDeleteButton = loadBoolSetting("showDeleteButton", true);
   let enableQuoteBlocks = loadBoolSetting("enableQuoteBlocks", true);
   let enableUploadProgress = loadBoolSetting("enableUploadProgress", true);
+  let uploadProgressTextMode = loadStringSetting(
+    "uploadProgressTextMode",
+    loadBoolSetting("showUploadFileSizeInBar", false) ? "size" : "percent",
+    ["percent", "size", "both"],
+  );
+  let showUploadFileSize = loadBoolSetting("showUploadFileSize", true);
   let enableForumButton = loadBoolSetting("enableForumButton", true);
 
   let selectedText = "";
@@ -66,6 +91,17 @@
   const __ultremeXhrMeta = new WeakMap();
   const __ultremeOrigOpen = NativeXHR.prototype.open;
   const __ultremeOrigSend = NativeXHR.prototype.send;
+  const measureUploadProgressTextWidth = (() => {
+    let canvas = null;
+    let ctx = null;
+    return (text) => {
+      canvas ||= document.createElement("canvas");
+      ctx ||= canvas.getContext("2d");
+      if (!ctx) return DEFAULT_UPLOAD_PROGRESS_BAR_WIDTH;
+      ctx.font = "bold 12px sans-serif";
+      return Math.ceil(ctx.measureText(String(text || "")).width);
+    };
+  })();
 
   const getMessagesContainer = () => document.getElementById("umi-messages");
 
@@ -110,10 +146,21 @@
       font-size: 13px;
     `;
 
+    const sizeLabel = document.createElement("span");
+    sizeLabel.id = "upload-progress-size";
+    sizeLabel.style.cssText = `
+      color: var(--theme-colour-main-colour);
+      font-size: 12px;
+      min-width: 120px;
+      white-space: nowrap;
+      display: ${uploadProgressTextMode === "percent" && showUploadFileSize ? "" : "none"};
+    `;
+
     const barContainer = document.createElement("div");
+    barContainer.id = "upload-progress-bar";
     barContainer.style.cssText = `
       position: relative;
-      width: 100px;
+      width: ${DEFAULT_UPLOAD_PROGRESS_BAR_WIDTH}px;
       height: 20px;
       background-color: var(--theme-colour-input-menu-button);
       border-radius: 2px;
@@ -125,9 +172,18 @@
     inner.id = "upload-progress-inner";
     inner.style.cssText = `
       background-color: var(--theme-colour-input-menu-button-hover);
+      position: absolute;
+      inset: 0 auto 0 0;
       height: 100%;
       width: 0%;
       transition: width 0.15s ease;
+    `;
+
+    const text = document.createElement("div");
+    text.id = "upload-progress-text";
+    text.style.cssText = `
+      position: absolute;
+      inset: 0;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -135,11 +191,18 @@
       font-size: 12px;
       font-weight: bold;
       font-family: sans-serif;
+      white-space: pre;
+      pointer-events: none;
     `;
 
-    barContainer.appendChild(inner);
-    wrapper.append(label, barContainer);
+    barContainer.append(inner, text);
+    wrapper.append(label, barContainer, sizeLabel);
     spoilerBtn.parentElement?.appendChild(wrapper);
+  }
+
+  function formatUploadSize(bytes) {
+    const mb = bytes / (1024 * 1024);
+    return `${mb.toFixed(mb >= 100 ? 0 : mb >= 10 ? 1 : 2)} MB`;
   }
 
   function updateCombinedProgress() {
@@ -155,19 +218,38 @@
 
     const percent = totalSize === 0 ? 0 : Math.round((totalLoaded / totalSize) * 100);
     const wrapper = document.getElementById("upload-progress-wrapper");
+    const bar = document.getElementById("upload-progress-bar");
     const inner = document.getElementById("upload-progress-inner");
-    if (!wrapper || !inner) return;
+    const text = document.getElementById("upload-progress-text");
+    const sizeLabel = document.getElementById("upload-progress-size");
+    if (!wrapper || !bar || !inner || !text || !sizeLabel) return;
+
+    const sizeText = `${formatUploadSize(totalLoaded)}/${formatUploadSize(totalSize)}`;
+    const barText =
+      uploadProgressTextMode === "size"
+        ? sizeText
+        : uploadProgressTextMode === "both"
+          ? `${percent}%   ${sizeText}`
+          : `${percent}%`;
+    const barWidth =
+      uploadProgressTextMode === "percent"
+        ? DEFAULT_UPLOAD_PROGRESS_BAR_WIDTH
+        : Math.max(DEFAULT_UPLOAD_PROGRESS_BAR_WIDTH, measureUploadProgressTextWidth(barText) + UPLOAD_PROGRESS_BAR_TEXT_PADDING);
 
     wrapper.style.opacity = "1";
+    bar.style.width = `${barWidth}px`;
     inner.style.width = `${percent}%`;
-    inner.textContent = `${percent}%`;
+    text.textContent = barText;
+    sizeLabel.textContent = sizeText;
 
     if (allDone) {
       setTimeout(() => {
         wrapper.style.opacity = "0";
         setTimeout(() => {
+          bar.style.width = `${DEFAULT_UPLOAD_PROGRESS_BAR_WIDTH}px`;
           inner.style.width = "0%";
-          inner.textContent = "";
+          text.textContent = "";
+          sizeLabel.textContent = "";
           uploads.clear();
         }, 150);
       }, 800);
@@ -1167,6 +1249,24 @@
           font-size: 12px;
           color: var(--theme-colour-message-time-colour);
         }
+        .ultreme-setting-group-title {
+          margin: 10px 0 4px;
+          font-size: 12px;
+          font-weight: bold;
+          color: var(--theme-colour-main-colour);
+        }
+        .ultreme-setting-group {
+          padding-left: 8px;
+          border-left: 2px solid var(--theme-colour-settings-input-border);
+          margin-bottom: 8px;
+        }
+        .ultreme-setting-group .setting__container:last-child {
+          margin-bottom: 0;
+        }
+        .ultreme-setting-disabled {
+          opacity: 0.55;
+          pointer-events: none;
+        }
       `;
       document.head.appendChild(style);
     };
@@ -1549,6 +1649,20 @@
           body.appendChild(hint);
         };
 
+        const createSettingGroup = (body, titleText, hintText = "") => {
+          const title = document.createElement("div");
+          title.className = "ultreme-setting-group-title";
+          title.textContent = titleText;
+          body.appendChild(title);
+
+          const group = document.createElement("div");
+          group.className = "ultreme-setting-group";
+          body.appendChild(group);
+
+          if (hintText) addHint(group, hintText);
+          return group;
+        };
+
         const addCheckbox = (body, cls, labelText) => {
           const container = document.createElement("div");
           container.className = "setting__container setting__container--checkbox";
@@ -1558,6 +1672,27 @@
 
           const input = document.createElement("input");
           input.type = "checkbox";
+          input.className = `setting__input ${cls}`;
+
+          const text = document.createElement("div");
+          text.textContent = labelText;
+
+          label.append(input, text);
+          container.appendChild(label);
+          body.appendChild(container);
+          return input;
+        };
+
+        const addRadio = (body, groupName, cls, labelText) => {
+          const container = document.createElement("div");
+          container.className = "setting__container setting__container--checkbox";
+
+          const label = document.createElement("label");
+          label.className = "setting__label";
+
+          const input = document.createElement("input");
+          input.type = "radio";
+          input.name = groupName;
           input.className = `setting__input ${cls}`;
 
           const text = document.createElement("div");
@@ -1590,6 +1725,24 @@
           return { wrap, btn };
         };
 
+        const bindRadioSetting = (inputs, key, getValue, setValue, onChange) => {
+          const sync = () => {
+            const value = getValue();
+            for (const [radioValue, input] of Object.entries(inputs)) input.checked = value === radioValue;
+          };
+
+          sync();
+
+          for (const [radioValue, input] of Object.entries(inputs)) {
+            input.addEventListener("change", () => {
+              if (!input.checked) return;
+              setValue(radioValue);
+              saveStringSetting(key, radioValue);
+              onChange?.(radioValue);
+            });
+          }
+        };
+
         const quotingBody = createCategory("Quoting");
         const deletingBody = createCategory("Deleting");
         const miscBody = createCategory("Misc.");
@@ -1604,8 +1757,53 @@
         const enableDeleteInput = addCheckbox(deletingBody, "js-ultreme-enableDelete", "Enable Delete");
         const showDeleteButtonInput = addCheckbox(deletingBody, "js-ultreme-showDeleteButton", "Show Delete button");
 
-        const enableUploadProgressInput = addCheckbox(miscBody, "js-ultreme-enableUploadProgress", "Show upload progress bar");
-        const enableForumButtonInput = addCheckbox(miscBody, "js-ultreme-enableForumButton", "Show Flashii logo (Go to Forum) button");
+        const uploadGroup = createSettingGroup(miscBody, "Upload Progress");
+        const enableUploadProgressInput = addCheckbox(uploadGroup, "js-ultreme-enableUploadProgress", "Show upload progress bar");
+        const uploadInsideGroup = createSettingGroup(uploadGroup, "Inside Bar");
+        const uploadProgressPercentInput = addRadio(uploadInsideGroup, "ultreme-upload-progress-text-mode", "js-ultreme-uploadProgressPercent", "Percentage");
+        const uploadProgressSizeInput = addRadio(uploadInsideGroup, "ultreme-upload-progress-text-mode", "js-ultreme-uploadProgressSize", "File size");
+        const uploadProgressBothInput = addRadio(uploadInsideGroup, "ultreme-upload-progress-text-mode", "js-ultreme-uploadProgressBoth", "Both");
+        const uploadOutsideGroup = createSettingGroup(uploadGroup, "Outside Bar");
+        const showUploadFileSizeInput = addCheckbox(uploadOutsideGroup, "js-ultreme-showUploadFileSize", "File size");
+
+        const navigationGroup = createSettingGroup(miscBody, "Navigation");
+        const enableForumButtonInput = addCheckbox(navigationGroup, "js-ultreme-enableForumButton", "Show Flashii logo (Go to Forum) button");
+
+        const syncUploadFileSizeControls = () => {
+          const sizeLabel = document.getElementById("upload-progress-size");
+          const disableUploadTextControls = !enableUploadProgress;
+          const disableSideSize = !enableUploadProgress || uploadProgressTextMode === "both";
+          const sideSizeLabel = showUploadFileSizeInput.closest(".setting__label");
+          const uploadTextLabels = [
+            uploadProgressPercentInput.closest(".setting__label"),
+            uploadProgressSizeInput.closest(".setting__label"),
+            uploadProgressBothInput.closest(".setting__label"),
+          ];
+
+          for (const input of [uploadProgressPercentInput, uploadProgressSizeInput, uploadProgressBothInput]) {
+            input.disabled = disableUploadTextControls;
+          }
+          for (const label of uploadTextLabels) {
+            label?.classList.toggle("ultreme-setting-disabled", disableUploadTextControls);
+          }
+
+          if (disableUploadTextControls && uploadProgressTextMode !== "percent") {
+            uploadProgressTextMode = "percent";
+            saveStringSetting("uploadProgressTextMode", uploadProgressTextMode);
+            uploadProgressPercentInput.checked = true;
+          }
+
+          if (disableSideSize && showUploadFileSize) {
+            showUploadFileSize = false;
+            saveBoolSetting("showUploadFileSize", false);
+            showUploadFileSizeInput.checked = false;
+          }
+
+          showUploadFileSizeInput.disabled = disableSideSize;
+          sideSizeLabel?.classList.toggle("ultreme-setting-disabled", disableSideSize);
+
+          if (sizeLabel) sizeLabel.style.display = enableUploadProgress && !disableSideSize && showUploadFileSize ? "" : "none";
+        };
 
         bindCheckboxSetting(showQuoteButtonInput, "showQuoteButton", () => showQuoteButton, (v) => {
           showQuoteButton = v;
@@ -1642,8 +1840,39 @@
         bindCheckboxSetting(enableUploadProgressInput, "enableUploadProgress", () => enableUploadProgress, (v) => {
           enableUploadProgress = v;
         }, (v) => {
-          if (!v) disableUploadProgressUI();
+          if (!v) {
+            disableUploadProgressUI();
+          } else {
+            createProgressBar();
+          }
+          syncUploadFileSizeControls();
         });
+
+        bindRadioSetting(
+          {
+            percent: uploadProgressPercentInput,
+            size: uploadProgressSizeInput,
+            both: uploadProgressBothInput,
+          },
+          "uploadProgressTextMode",
+          () => uploadProgressTextMode,
+          (v) => {
+            uploadProgressTextMode = v;
+          },
+          () => {
+            syncUploadFileSizeControls();
+            updateCombinedProgress();
+          },
+        );
+
+        bindCheckboxSetting(showUploadFileSizeInput, "showUploadFileSize", () => showUploadFileSize, (v) => {
+          showUploadFileSize = v;
+        }, (v) => {
+          const sizeLabel = document.getElementById("upload-progress-size");
+          if (sizeLabel) sizeLabel.style.display = enableUploadProgress && uploadProgressTextMode === "percent" && v ? "" : "none";
+        });
+
+        syncUploadFileSizeControls();
 
         bindCheckboxSetting(enableForumButtonInput, "enableForumButton", () => enableForumButton, (v) => {
           enableForumButton = v;
