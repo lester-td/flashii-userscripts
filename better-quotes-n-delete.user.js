@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Flashii Chat - Better Quotes & Delete Button
 // @namespace    https://patchii.net/lester/flashii-chat-userscripts
-// @version      4.4.1
+// @version      4.4.2
 // @description  Adds message quoting and preview, quote blocks, media viewer, and delete button to own messages.
 // @author       lester
 // @match        *://chat.flashii.net/*
@@ -17,6 +17,7 @@
   const enableDelete = true;
   const DEFAULT_NAME_COLOR = "#ffffff";
   const DEFAULT_AVATAR_URL = "https://flashii.net/assets/avatar/";
+  const PATCHII_PAGE_URL = "https://patchii.net/lester/flashii-chat-userscripts";
   const cssID = "chat-style";
 
   let selectedText = "";
@@ -341,6 +342,18 @@
     else form.insertBefore(el, main);
   };
 
+  const showDeprecationNotice = () => {
+    if (document.getElementById("legacy-script-notice")) return;
+
+    const notice = document.createElement("div");
+    notice.id = "legacy-script-notice";
+    notice.innerHTML =
+      'This script is now deprecated, please download the Ultreme Script from the <a href="' +
+      PATCHII_PAGE_URL +
+      '" target="_blank" rel="noopener noreferrer">Patchii Repo</a>.';
+    insertBanner(notice);
+  };
+
   document.addEventListener("mouseup", () => {
     const sel = window.getSelection?.();
     const range = sel?.rangeCount ? sel.getRangeAt(0) : null;
@@ -482,6 +495,18 @@
           background: var(--theme-colour-input-menu-button);
           color: var(--theme-colour-main-colour);
           filter: brightness(0.8);
+        }
+        #legacy-script-notice {
+          background: var(--theme-colour-input-background);
+          border: 1px solid var(--theme-colour-settings-input-border);
+          padding: 6px 10px;
+          font-size: 13px;
+          margin: 4px -1px;
+          max-width: 100%;
+        }
+        #legacy-script-notice a {
+          color: var(--theme-colour-main-accent);
+          text-decoration: underline;
         }
         #cancel-quote {
           flex: 0 0 auto;
@@ -1105,6 +1130,7 @@
     };
 
     injectCSS();
+    showDeprecationNotice();
     processNewMessages();
 
     const container = getMessagesContainer();

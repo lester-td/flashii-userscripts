@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Flashii Chat - File Upload Progress Bar
 // @namespace    https://patchii.net/lester/flashii-chat-userscripts
-// @version      1.4.1
+// @version      1.4.2
 // @description  Show progress bar for file uploads in chat.
 // @author       lester
 // @match        *://chat.flashii.net/*
@@ -14,11 +14,50 @@
   "use strict";
 
   const W = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
+  const PATCHII_PAGE_URL = "https://patchii.net/lester/flashii-chat-userscripts";
   const NativeXHR = W.XMLHttpRequest;
   const uploads = new Map();
   const xhrMeta = new WeakMap();
   const origOpen = NativeXHR.prototype.open;
   const origSend = NativeXHR.prototype.send;
+
+  function injectDeprecationNoticeStyle() {
+    if (document.getElementById("legacy-script-style")) return;
+
+    const style = document.createElement("style");
+    style.id = "legacy-script-style";
+    style.textContent = `
+      #legacy-script-notice {
+        background: var(--theme-colour-input-background);
+        border: 1px solid var(--theme-colour-settings-input-border);
+        padding: 6px 10px;
+        font-size: 13px;
+        margin: 4px -1px;
+        max-width: 100%;
+      }
+      #legacy-script-notice a {
+        color: var(--theme-colour-main-accent);
+        text-decoration: underline;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function showDeprecationNotice() {
+    if (document.getElementById("legacy-script-notice")) return;
+
+    const form = document.querySelector("form.input");
+    const main = form?.querySelector(".input__main");
+    if (!form || !main) return;
+
+    const notice = document.createElement("div");
+    notice.id = "legacy-script-notice";
+    notice.innerHTML =
+      'This script is now deprecated, please download the Ultreme Script from the <a href="' +
+      PATCHII_PAGE_URL +
+      '" target="_blank" rel="noopener noreferrer">Patchii Repo</a>.';
+    form.insertBefore(notice, main);
+  }
 
   function createProgressBar() {
     if (document.getElementById("upload-progress-wrapper")) return;
@@ -176,4 +215,9 @@
   }
 
   installUploadProgressPatchOnce();
+
+  W.addEventListener("umi:connect", () => {
+    injectDeprecationNoticeStyle();
+    showDeprecationNotice();
+  });
 })();
