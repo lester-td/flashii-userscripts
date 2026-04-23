@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Flashii Chat - Ultreme Script
 // @namespace    https://patchii.net/lester/flashii-chat-userscripts
-// @version      5.5
+// @version      5.5.1
 // @description  Better quotes & delete button, quote blocks, upload progress bar, and Go to Forum button with settings.
 // @author       lester
 // @match        *://chat.flashii.net/*
@@ -1227,7 +1227,7 @@
         }
         #quote-preview .ultreme-preview-media {
           color: var(--theme-colour-main-accent);
-          text-decoration: underline;
+          text-decoration: none;
           cursor: pointer;
         }
         #quote-preview .ultreme-preview-spoiler {
@@ -1387,12 +1387,12 @@
         }
         .message__quote-text a.message__quote-media {
           color: var(--theme-colour-main-accent);
-          text-decoration: underline;
+          text-decoration: none;
           cursor: pointer;
         }
         .message__quote-text .message__quote-embed-toggle {
           color: var(--theme-colour-main-accent);
-          text-decoration: underline;
+          text-decoration: none;
           cursor: pointer;
         }
         .message__quote-embed {
