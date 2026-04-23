@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Flashii Chat - Better Quotes & Delete Button
 // @namespace    https://patchii.net/lester/flashii-chat-userscripts
-// @version      4.3.1
-// @description  Adds message quoting and preview, via button and timestamp. Adds delete button to own messages.
+// @version      4.4
+// @description  Adds message quoting and preview, quote blocks, media viewer, and delete button to own messages.
 // @author       lester
 // @match        *://chat.flashii.net/*
 // @grant        none

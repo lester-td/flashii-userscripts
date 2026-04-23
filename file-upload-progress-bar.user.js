@@ -1,30 +1,35 @@
 // ==UserScript==
 // @name         Flashii Chat - File Upload Progress Bar
 // @namespace    https://patchii.net/lester/flashii-chat-userscripts
-// @version      1.3
-// @description  Show prograss bar for file upload in chat.
+// @version      1.4
+// @description  Show progress bar for file uploads in chat.
 // @author       lester
 // @match        *://chat.flashii.net/*
-// @grant        none
+// @grant        unsafeWindow
 // @downloadURL  https://patchii.net/lester/flashii-chat-userscripts/raw/branch/trunk/file-upload-progress-bar.user.js
 // @updateURL    https://patchii.net/lester/flashii-chat-userscripts/raw/branch/trunk/file-upload-progress-bar.meta.js
 // ==/UserScript==
 
-(function () {
-  'use strict';
+(() => {
+  "use strict";
 
-  const originalXHR = window.XMLHttpRequest;
+  const W = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
+  const NativeXHR = W.XMLHttpRequest;
   const uploads = new Map();
+  const xhrMeta = new WeakMap();
+  const origOpen = NativeXHR.prototype.open;
+  const origSend = NativeXHR.prototype.send;
 
   function createProgressBar() {
-    if (document.getElementById('upload-progress-wrapper')) return;
+    if (document.getElementById("upload-progress-wrapper")) return;
 
-    const spoilerBtn = [...document.querySelectorAll('.markup__button')]
-      .find(btn => btn.textContent.trim().toLowerCase() === 'spoiler');
+    const spoilerBtn = [...document.querySelectorAll(".markup__button")].find(
+      (btn) => btn.textContent.trim().toLowerCase() === "spoiler",
+    );
     if (!spoilerBtn) return;
 
-    const wrapper = document.createElement('div');
-    wrapper.id = 'upload-progress-wrapper';
+    const wrapper = document.createElement("div");
+    wrapper.id = "upload-progress-wrapper";
     wrapper.style.cssText = `
       display: flex;
       align-items: center;
@@ -34,14 +39,14 @@
       transition: opacity 0.15s ease;
     `;
 
-    const label = document.createElement('span');
-    label.textContent = 'Uploading File...';
+    const label = document.createElement("span");
+    label.textContent = "Uploading File...";
     label.style.cssText = `
       color: var(--theme-colour-main-colour);
       font-size: 13px;
     `;
 
-    const barContainer = document.createElement('div');
+    const barContainer = document.createElement("div");
     barContainer.style.cssText = `
       position: relative;
       width: 100px;
@@ -52,8 +57,8 @@
       overflow: hidden;
     `;
 
-    const inner = document.createElement('div');
-    inner.id = 'upload-progress-inner';
+    const inner = document.createElement("div");
+    inner.id = "upload-progress-inner";
     inner.style.cssText = `
       background-color: var(--theme-colour-input-menu-button-hover);
       height: 100%;
@@ -70,7 +75,7 @@
 
     barContainer.appendChild(inner);
     wrapper.append(label, barContainer);
-    spoilerBtn.parentElement.appendChild(wrapper);
+    spoilerBtn.parentElement?.appendChild(wrapper);
   }
 
   function updateCombinedProgress() {
@@ -85,65 +90,73 @@
     }
 
     const percent = totalSize === 0 ? 0 : Math.round((totalLoaded / totalSize) * 100);
-    const wrapper = document.getElementById('upload-progress-wrapper');
-    const inner = document.getElementById('upload-progress-inner');
+    const wrapper = document.getElementById("upload-progress-wrapper");
+    const inner = document.getElementById("upload-progress-inner");
     if (!wrapper || !inner) return;
 
-    wrapper.style.opacity = '1';
+    wrapper.style.opacity = "1";
     inner.style.width = `${percent}%`;
     inner.textContent = `${percent}%`;
 
     if (allDone) {
       setTimeout(() => {
-        wrapper.style.opacity = '0';
+        wrapper.style.opacity = "0";
         setTimeout(() => {
-          inner.style.width = '0%';
-          inner.textContent = '';
+          inner.style.width = "0%";
+          inner.textContent = "";
           uploads.clear();
         }, 150);
       }, 800);
     }
   }
 
-  function CustomXHR() {
-    const xhr = new originalXHR();
+  function installUploadProgressPatchOnce() {
+    if (NativeXHR.prototype.__ultremeUploadPatched) return;
+    NativeXHR.prototype.__ultremeUploadPatched = true;
 
-    xhr.open = function (method, url) {
-      this._isUpload = method === 'POST' && url.includes('/uploads');
-      return originalXHR.prototype.open.apply(this, arguments);
+    NativeXHR.prototype.open = function (method, url) {
+      try {
+        const m = String(method || "").toUpperCase();
+        const u = String(url || "");
+        const isUpload = m === "POST" && u.includes("/uploads");
+        xhrMeta.set(this, { isUpload, hooked: false, id: null });
+      } catch {}
+      return origOpen.apply(this, arguments);
     };
 
-    xhr.send = function (body) {
-      if (this._isUpload) {
-        const id = Math.random().toString(36).slice(2);
-        createProgressBar();
-        uploads.set(id, { loaded: 0, total: 0, done: false });
+    NativeXHR.prototype.send = function () {
+      try {
+        const meta = xhrMeta.get(this);
+        if (meta?.isUpload && !meta.hooked) {
+          meta.hooked = true;
+          meta.id = Math.random().toString(36).slice(2);
+          xhrMeta.set(this, meta);
 
-        this.upload.onprogress = e => {
-          if (e.lengthComputable) {
-            uploads.set(id, {
-              loaded: e.loaded,
-              total: e.total,
-              done: false
+          createProgressBar();
+          uploads.set(meta.id, { loaded: 0, total: 0, done: false });
+
+          if (this.upload && this.upload.addEventListener) {
+            this.upload.addEventListener("progress", (e) => {
+              if (e.lengthComputable) {
+                uploads.set(meta.id, { loaded: e.loaded, total: e.total, done: false });
+                updateCombinedProgress();
+              }
             });
-            updateCombinedProgress();
           }
-        };
 
-        this.addEventListener('loadend', () => {
-          const current = uploads.get(id);
-          if (current) {
-            uploads.set(id, { ...current, done: true });
-            updateCombinedProgress();
-          }
-        });
-      }
+          this.addEventListener("loadend", () => {
+            const current = uploads.get(meta.id);
+            if (current) {
+              uploads.set(meta.id, { ...current, done: true });
+              updateCombinedProgress();
+            }
+          });
+        }
+      } catch {}
 
-      return originalXHR.prototype.send.apply(this, arguments);
+      return origSend.apply(this, arguments);
     };
-
-    return xhr;
   }
 
-  window.XMLHttpRequest = CustomXHR;
+  installUploadProgressPatchOnce();
 })();

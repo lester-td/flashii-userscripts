@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Flashii Chat - File Upload Progress Bar
 // @namespace    https://patchii.net/lester/flashii-chat-userscripts
-// @version      1.3
+// @version      1.4
 // @description  Show prograss bar for file upload in chat.
 // @author       lester
 // @match        *://chat.flashii.net/*
