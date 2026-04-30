@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Flashii Chat - Ultreme Script
 // @namespace    https://patchii.net/lester/flashii-chat-userscripts
-// @version      5.5.2
+// @version      5.5.3
 // @description  Better quotes & delete button, quote blocks, upload progress bar, and Go to Forum button with settings.
 // @author       lester
 // @match        *://chat.flashii.net/*
@@ -110,6 +110,30 @@
 
   const getUploadPopupRoot = () => document.getElementById("upload-progress-popup");
 
+  const getCombinedUploadProgressElements = () => {
+    const wrapper = document.getElementById("upload-progress-wrapper");
+    const bar = document.getElementById("upload-progress-bar");
+    const inner = document.getElementById("upload-progress-inner");
+    const text = document.getElementById("upload-progress-text");
+    const sizeLabel = document.getElementById("upload-progress-size");
+    if (!wrapper || !bar || !inner || !text || !sizeLabel) return null;
+    return { wrapper, bar, inner, text, sizeLabel };
+  };
+
+  const getCombinedUploadProgressText = (percent, sizeText) => {
+    if (uploadProgressTextMode === "size") return sizeText;
+    if (uploadProgressTextMode === "both") return `${percent}%   ${sizeText}`;
+    return `${percent}%`;
+  };
+
+  const getCombinedUploadProgressBarWidth = (barText) =>
+    uploadProgressTextMode === "percent"
+      ? DEFAULT_UPLOAD_PROGRESS_BAR_WIDTH
+      : Math.max(
+          DEFAULT_UPLOAD_PROGRESS_BAR_WIDTH,
+          measureUploadProgressTextWidth(barText) + UPLOAD_PROGRESS_BAR_TEXT_PADDING,
+        );
+
   const getVisibleMessages = () => {
     const container = getMessagesContainer();
     if (!container) return [];
@@ -136,7 +160,10 @@
     const raw = userEl.style?.color;
     const userColor = !raw || raw === "inherit" ? null : rgbToHex(raw);
     const name = userEl.textContent?.trim() || "Unknown";
-    const msgText = typeof overrideText === "string" ? overrideText.trim() : cleanMessage(msg.dataset.body || textEl.textContent?.trim() || "");
+    const msgText =
+      typeof overrideText === "string"
+        ? overrideText.trim()
+        : cleanMessage(msg.dataset.body || textEl.textContent?.trim() || "");
 
     return {
       name,
@@ -270,12 +297,9 @@
 
     if (uploads.size > 0 || uploadProgressDisplayMode !== "combined") return;
 
-    const wrapper = document.getElementById("upload-progress-wrapper");
-    const bar = document.getElementById("upload-progress-bar");
-    const inner = document.getElementById("upload-progress-inner");
-    const text = document.getElementById("upload-progress-text");
-    const sizeLabel = document.getElementById("upload-progress-size");
-    if (!wrapper || !bar || !inner || !text || !sizeLabel) return;
+    const elements = getCombinedUploadProgressElements();
+    if (!elements) return;
+    const { wrapper, bar, inner, text, sizeLabel } = elements;
 
     wrapper.style.opacity = "0";
     bar.style.width = `${DEFAULT_UPLOAD_PROGRESS_BAR_WIDTH}px`;
@@ -289,25 +313,14 @@
 
     createProgressBar();
 
-    const wrapper = document.getElementById("upload-progress-wrapper");
-    const bar = document.getElementById("upload-progress-bar");
-    const inner = document.getElementById("upload-progress-inner");
-    const text = document.getElementById("upload-progress-text");
-    const sizeLabel = document.getElementById("upload-progress-size");
-    if (!wrapper || !bar || !inner || !text || !sizeLabel) return;
+    const elements = getCombinedUploadProgressElements();
+    if (!elements) return;
+    const { wrapper, bar, inner, text, sizeLabel } = elements;
 
     const previewPercent = 64;
     const previewSizeText = "12.4 MB/19.6 MB";
-    const barText =
-      uploadProgressTextMode === "size"
-        ? previewSizeText
-        : uploadProgressTextMode === "both"
-          ? `${previewPercent}%   ${previewSizeText}`
-          : `${previewPercent}%`;
-    const barWidth =
-      uploadProgressTextMode === "percent"
-        ? DEFAULT_UPLOAD_PROGRESS_BAR_WIDTH
-        : Math.max(DEFAULT_UPLOAD_PROGRESS_BAR_WIDTH, measureUploadProgressTextWidth(barText) + UPLOAD_PROGRESS_BAR_TEXT_PADDING);
+    const barText = getCombinedUploadProgressText(previewPercent, previewSizeText);
+    const barWidth = getCombinedUploadProgressBarWidth(barText);
 
     wrapper.style.opacity = "1";
     bar.style.width = `${barWidth}px`;
@@ -507,24 +520,13 @@
     }
 
     const percent = totalSize === 0 ? 0 : Math.round((totalLoaded / totalSize) * 100);
-    const wrapper = document.getElementById("upload-progress-wrapper");
-    const bar = document.getElementById("upload-progress-bar");
-    const inner = document.getElementById("upload-progress-inner");
-    const text = document.getElementById("upload-progress-text");
-    const sizeLabel = document.getElementById("upload-progress-size");
-    if (!wrapper || !bar || !inner || !text || !sizeLabel) return;
+    const elements = getCombinedUploadProgressElements();
+    if (!elements) return;
+    const { wrapper, bar, inner, text, sizeLabel } = elements;
 
     const sizeText = `${formatUploadSize(totalLoaded)}/${formatUploadSize(totalSize)}`;
-    const barText =
-      uploadProgressTextMode === "size"
-        ? sizeText
-        : uploadProgressTextMode === "both"
-          ? `${percent}%   ${sizeText}`
-          : `${percent}%`;
-    const barWidth =
-      uploadProgressTextMode === "percent"
-        ? DEFAULT_UPLOAD_PROGRESS_BAR_WIDTH
-        : Math.max(DEFAULT_UPLOAD_PROGRESS_BAR_WIDTH, measureUploadProgressTextWidth(barText) + UPLOAD_PROGRESS_BAR_TEXT_PADDING);
+    const barText = getCombinedUploadProgressText(percent, sizeText);
+    const barWidth = getCombinedUploadProgressBarWidth(barText);
 
     wrapper.style.opacity = "1";
     bar.style.width = `${barWidth}px`;
@@ -734,6 +736,24 @@
       .replace(/\[Embed\]|\[Remove\]/g, "")
       .replace(/\[color=var\(--theme-colour-message-time-colour\)\][^\w\[\]]{1,3}\[\/color\]/g, "")
       .trim();
+  }
+
+  function getElementTextWithBreaks(el) {
+    const parts = [];
+    const walk = (node) => {
+      if (!node) return;
+      if (node.nodeType === Node.TEXT_NODE) {
+        parts.push(node.nodeValue || "");
+        return;
+      }
+      if (node.nodeName === "BR") {
+        parts.push(" ");
+        return;
+      }
+      for (const child of node.childNodes) walk(child);
+    };
+    walk(el);
+    return parts.join("").replace(/\s+/g, " ").trim();
   }
 
   const getAvatarUrl = (authorId, avatarVersion = null) => {
@@ -1205,7 +1225,6 @@
         }
       }, 50);
     }
-
   });
 
   document.addEventListener(
@@ -1501,6 +1520,150 @@
         .message__quote + .message__text {
           display: block;
           margin-top: 2px;
+        }
+        #umi-messages.chat--compact .message__container.has-inline-quote {
+          display: grid !important;
+          grid-template-columns: max-content minmax(0, 1fr);
+          align-items: baseline;
+          column-gap: 4px;
+          min-width: 0;
+        }
+        #umi-messages.chat--compact .message__container.has-inline-quote .message__meta {
+          display: inline-flex !important;
+          align-items: baseline;
+          grid-column: 1;
+          grid-row: 2;
+          margin-right: 0;
+          margin-bottom: 0 !important;
+        }
+        #umi-messages.chat--compact .message__container.has-inline-quote .message__time {
+          order: 1;
+          margin-right: 3px;
+        }
+        #umi-messages.chat--compact .message__container.has-inline-quote .message__user {
+          order: 2;
+        }
+        #umi-messages.chat--compact .message__container.has-inline-quote .message__body {
+          display: contents !important;
+        }
+        #umi-messages.chat--compact .message__quote {
+          display: inline-flex !important;
+          align-items: center;
+          grid-column: 1 / -1;
+          grid-row: 1;
+          justify-self: start;
+          vertical-align: baseline;
+          gap: 4px;
+          max-width: min(60vw, 380px);
+          margin: 0 0 2px 0 !important;
+          padding: 2px 5px;
+          border-width: 1px;
+          font-size: 12px;
+        }
+        #umi-messages.chat--compact .message__quote-avatar {
+          display: none;
+        }
+        #umi-messages.chat--compact .message__quote-body {
+          display: flex;
+          align-items: baseline;
+          gap: 4px;
+          min-width: 0;
+        }
+        #umi-messages.chat--compact .message__quote-header {
+          flex: 0 1 auto;
+          max-width: max-content;
+          min-width: fit-content;
+          margin-bottom: 0;
+          overflow: hidden;
+          text-overflow: clip;
+        }
+        #umi-messages.chat--compact .message__quote-header::after {
+          content: " @ " attr(data-quote-time) ":";
+          color: var(--theme-colour-message-time-colour);
+          font-weight: normal;
+        }
+        #umi-messages.chat--compact .message__quote-header span {
+          display: none;
+        }
+        #umi-messages.chat--compact .message__quote-text {
+          flex: 1 1 auto;
+          min-width: 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          word-break: normal;
+        }
+        #umi-messages.chat--compact .message__quote + .message__text {
+          display: inline-block !important;
+          grid-column: 2;
+          grid-row: 2;
+          min-width: 0;
+          margin-top: 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        #umi-messages.chat--compact .message__text q.ultreme-inline-quote {
+          display: inline-block;
+          max-width: min(55vw, 360px);
+          margin-right: 4px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          vertical-align: bottom;
+        }
+        #umi-messages.chat--compact .message__text i.ultreme-inline-quote span:not(:first-child) {
+          display: none;
+        }
+        #umi-messages.chat--compact .message__text q.ultreme-inline-quote br,
+        #umi-messages.chat--compact .message__text > br.ultreme-inline-quote,
+        #umi-messages.chat--compact .message__text > span.ultreme-inline-quote {
+          display: none;
+        }
+        body[data-ultreme-quote-blocks="0"] #umi-messages.chat--compact .message__container.has-inline-quote {
+          display: flex !important;
+          flex-direction: row !important;
+          align-items: baseline;
+          min-width: 0;
+        }
+        body[data-ultreme-quote-blocks="0"] #umi-messages.chat--compact .message__container.has-inline-quote .message__meta {
+          display: inline-flex !important;
+          align-items: baseline;
+          flex: 0 0 auto;
+          margin-right: 4px;
+          margin-bottom: 0 !important;
+        }
+        body[data-ultreme-quote-blocks="0"] #umi-messages.chat--compact .message__container.has-inline-quote .message__body {
+          display: inline !important;
+        }
+        body[data-ultreme-quote-blocks="0"] #umi-messages.chat--compact .message__quote {
+          display: none !important;
+        }
+        body[data-ultreme-quote-blocks="0"] #umi-messages.chat--compact .message__quote + .message__text {
+          display: inline !important;
+          white-space: nowrap;
+        }
+        body[data-ultreme-quote-blocks="0"] #umi-messages.chat--compact .message__text i.ultreme-inline-quote,
+        body[data-ultreme-quote-blocks="0"] #umi-messages.chat--compact .message__text i.ultreme-inline-quote span,
+        body[data-ultreme-quote-blocks="0"] #umi-messages.chat--compact .message__text q.ultreme-inline-quote {
+          display: inline !important;
+        }
+        body[data-ultreme-quote-blocks="0"] #umi-messages.chat--compact .message__text q.ultreme-inline-quote {
+          max-width: none;
+          margin: 0 0 0 2px;
+          white-space: inherit;
+          overflow: visible;
+          text-overflow: clip;
+          vertical-align: baseline;
+        }
+        body[data-ultreme-quote-blocks="0"] #umi-messages.chat--compact .message__text q.ultreme-inline-quote::after {
+          content: close-quote " ";
+        }
+        body[data-ultreme-quote-blocks="0"] #umi-messages.chat--compact .message__text a.ultreme-inline-quote,
+        body[data-ultreme-quote-blocks="0"] #umi-messages.chat--compact .message__text q.ultreme-inline-quote br,
+        body[data-ultreme-quote-blocks="0"] #umi-messages.chat--compact .message__text > br.ultreme-inline-quote,
+        body[data-ultreme-quote-blocks="0"] #umi-messages.chat--compact .message__text > span.ultreme-inline-quote {
+          display: none !important;
         }
         #umi-media-modal {
           display: none;
@@ -1830,6 +1993,10 @@
       qEl.classList.add("ultreme-inline-quote");
       if (arrowSpan) arrowSpan.classList.add("ultreme-inline-quote");
       if (br) br.classList.add("ultreme-inline-quote");
+      qEl.querySelectorAll("br").forEach((quoteBr) => {
+        quoteBr.classList.add("ultreme-inline-quote");
+        quoteBr.before(document.createTextNode(" "));
+      });
 
       const targetMsg = targetId ? document.getElementById(`message-${targetId}`) : null;
 
@@ -1890,6 +2057,7 @@
 
       const header = document.createElement("div");
       header.className = "message__quote-header";
+      header.dataset.quoteTime = relTime;
       const showColor = quotedColor || DEFAULT_NAME_COLOR;
       header.innerHTML = `<b style="color:${showColor};">${quotedName}</b>${
         relTime ? ` <span style="color:var(--theme-colour-message-time-colour);">@ ${relTime}</span>` : ""
@@ -1898,7 +2066,7 @@
       const textDiv = document.createElement("div");
       textDiv.className = "message__quote-text";
 
-      const rawQuoted = qEl.textContent || "";
+      const rawQuoted = getElementTextWithBreaks(qEl);
       const withoutEmbed = rawQuoted.replace(/\[Embed\]/gi, "").trim();
 
       const urlRe = /(https?:)?\/\/\S+/g;
@@ -2198,7 +2366,11 @@
         const showQuoteButtonInput = addCheckbox(quotingBody, "js-ultreme-showQuoteButton", 'Show "Quote" button');
         const showGotoButtonInput = addCheckbox(quotingBody, "js-ultreme-showGotoButton", 'Show "Go to quote" button');
         const enableQuoteBlocksInput = addCheckbox(quotingBody, "js-ultreme-enableQuoteBlocks", "Render quotes as blocks");
-        const interceptNativeQuoteButtonInput = addCheckbox(quotingBody, "js-ultreme-interceptNativeQuoteButton", 'Rich partial quotes with bbcode "Quote" button');
+        const interceptNativeQuoteButtonInput = addCheckbox(
+          quotingBody,
+          "js-ultreme-interceptNativeQuoteButton",
+          'Rich partial quotes with bbcode "Quote" button',
+        );
 
         addHint(deletingBody, "Hold shift and click your message's timestamp to delete");
         const enableDeleteInput = addCheckbox(deletingBody, "js-ultreme-enableDelete", "Enable Delete");
@@ -2207,10 +2379,25 @@
         const uploadGroup = createSettingGroup(miscBody, "Upload Progress");
         const enableUploadProgressInput = addCheckbox(uploadGroup, "js-ultreme-enableUploadProgress", "Show upload progress bar");
         const uploadDisplaySection = createSettingSubsection(uploadGroup, "Display");
-        const uploadDisplayPerFileInput = addRadio(uploadDisplaySection.group, "ultreme-upload-progress-display-mode", "js-ultreme-uploadProgressDisplayPerFile", "Per-file popup");
-        const uploadDisplayCombinedInput = addRadio(uploadDisplaySection.group, "ultreme-upload-progress-display-mode", "js-ultreme-uploadProgressDisplayCombined", "Combined bar");
+        const uploadDisplayPerFileInput = addRadio(
+          uploadDisplaySection.group,
+          "ultreme-upload-progress-display-mode",
+          "js-ultreme-uploadProgressDisplayPerFile",
+          "Per-file popup",
+        );
+        const uploadDisplayCombinedInput = addRadio(
+          uploadDisplaySection.group,
+          "ultreme-upload-progress-display-mode",
+          "js-ultreme-uploadProgressDisplayCombined",
+          "Combined bar",
+        );
         const uploadInsideSection = createSettingSubsection(uploadGroup, "Inside Bar Text");
-        const uploadProgressPercentInput = addRadio(uploadInsideSection.group, "ultreme-upload-progress-text-mode", "js-ultreme-uploadProgressPercent", "Percentage");
+        const uploadProgressPercentInput = addRadio(
+          uploadInsideSection.group,
+          "ultreme-upload-progress-text-mode",
+          "js-ultreme-uploadProgressPercent",
+          "Percentage",
+        );
         const uploadProgressSizeInput = addRadio(uploadInsideSection.group, "ultreme-upload-progress-text-mode", "js-ultreme-uploadProgressSize", "File size");
         const uploadProgressBothInput = addRadio(uploadInsideSection.group, "ultreme-upload-progress-text-mode", "js-ultreme-uploadProgressBoth", "Both");
         const uploadOutsideSection = createSettingSubsection(uploadGroup, "Outside Bar Text");
@@ -2359,7 +2546,12 @@
           showUploadFileSize = v;
         }, (v) => {
           const sizeLabel = document.getElementById("upload-progress-size");
-          if (sizeLabel) sizeLabel.style.display = enableUploadProgress && uploadProgressDisplayMode === "combined" && uploadProgressTextMode === "percent" && v ? "" : "none";
+          if (sizeLabel) {
+            sizeLabel.style.display =
+              enableUploadProgress && uploadProgressDisplayMode === "combined" && uploadProgressTextMode === "percent" && v
+                ? ""
+                : "none";
+          }
           showUploadProgressPreview();
         });
 
@@ -2570,7 +2762,10 @@
             ? `#${id}:${authorId}${avatarVersion ? `:${avatarVersion}` : ""}`
             : `#${id}`;
 
-          const quoteBlock = `[i][color=${nameColor}][b]${name}[/b][/color] [color=var(--theme-colour-message-time-colour)]@ ${time} —[/color][/i][url=${quoteHref}]${hidden}[/url][quote]${storedText}[/quote]`;
+          const quoteBlock =
+            `[i][color=${nameColor}][b]${name}[/b][/color] ` +
+            `[color=var(--theme-colour-message-time-colour)]@ ${time} —[/color][/i]` +
+            `[url=${quoteHref}]${hidden}[/url][quote]${storedText}[/quote]`;
 
           const userText = (input.value || "").replace(/^[ \t]+/, "");
           const full = `${quoteBlock}${userText ? `\n[color=var(--theme-colour-message-time-colour)]└─ [/color]${userText}` : ""}`;
