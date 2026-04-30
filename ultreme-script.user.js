@@ -73,14 +73,11 @@
   let enableQuoteBlocks = loadBoolSetting("enableQuoteBlocks", true);
   let interceptNativeQuoteButton = loadBoolSetting("interceptNativeQuoteButton", true);
   let enableUploadProgress = loadBoolSetting("enableUploadProgress", true);
-  let uploadProgressTextMode = loadStringSetting(
-    "uploadProgressTextMode",
-    loadBoolSetting("showUploadFileSizeInBar", false) ? "size" : "percent",
-    ["percent", "size", "both"],
-  );
+  let uploadProgressTextMode = loadStringSetting("uploadProgressTextMode", "percent", ["percent", "size", "both"]);
   let uploadProgressDisplayMode = loadStringSetting("uploadProgressDisplayMode", "combined", ["combined", "perfile"]);
   let showUploadFileSize = loadBoolSetting("showUploadFileSize", true);
   let enableForumButton = loadBoolSetting("enableForumButton", true);
+  let enableJumpToBottomButton = loadBoolSetting("enableJumpToBottomButton", true);
 
   let selectedText = "";
   let selectedQuoteData = null;
@@ -655,6 +652,46 @@
 
   function removeForumButton() {
     document.querySelector(".custom-button")?.remove();
+  }
+
+  function scrollMessagesToBottom() {
+    const messages = getMessagesContainer();
+    if (!messages) return;
+
+    messages.scrollTop = messages.scrollHeight;
+    document.getElementById("umi-messages-anchor")?.scrollIntoView({ block: "end" });
+  }
+
+  function addJumpToBottomButton() {
+    if (!enableJumpToBottomButton) return;
+
+    const sidebarSelector = document.querySelector(".sidebar__selector");
+    if (!sidebarSelector || document.getElementById("ultreme-jump-bottom-button")) return;
+
+    const scrollModeButton = [...sidebarSelector.querySelectorAll(".sidebar__selector-mode")]
+      .find((button) => button.title === "Scroll mode");
+
+    const newButton = document.createElement("button");
+    newButton.id = "ultreme-jump-bottom-button";
+    newButton.type = "button";
+    newButton.className = "sidebar__selector-mode";
+    newButton.title = "Jump to bottom";
+
+    const icon = document.createElement("i");
+    icon.className = "fas fa-arrow-down sidebar-gutter-font-icon";
+    newButton.appendChild(icon);
+
+    newButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      scrollMessagesToBottom();
+    });
+
+    if (scrollModeButton) scrollModeButton.after(newButton);
+    else sidebarSelector.appendChild(newButton);
+  }
+
+  function removeJumpToBottomButton() {
+    document.getElementById("ultreme-jump-bottom-button")?.remove();
   }
 
   function smartSlice(text, limit = 100, edge = 50, spill = 10) {
@@ -2181,6 +2218,7 @@
 
         const navigationGroup = createSettingGroup(miscBody, "Navigation");
         const enableForumButtonInput = addCheckbox(navigationGroup, "js-ultreme-enableForumButton", "Show Flashii logo (Go to Forum) button");
+        const enableJumpToBottomButtonInput = addCheckbox(navigationGroup, "js-ultreme-enableJumpToBottomButton", "Show Jump to bottom button");
 
         const syncUploadFileSizeControls = () => {
           const sizeLabel = document.getElementById("upload-progress-size");
@@ -2332,6 +2370,13 @@
         }, (v) => {
           if (v) addForumButton();
           else removeForumButton();
+        });
+
+        bindCheckboxSetting(enableJumpToBottomButtonInput, "enableJumpToBottomButton", () => enableJumpToBottomButton, (v) => {
+          enableJumpToBottomButton = v;
+        }, (v) => {
+          if (v) addJumpToBottomButton();
+          else removeJumpToBottomButton();
         });
 
         const ver = getInstalledVersion() || "unknown";
@@ -2490,6 +2535,7 @@
     installMenuRetry();
     processNewMessages();
     addForumButton();
+    addJumpToBottomButton();
 
     if (!document.__ultremeSelectedQuoteHookInstalled) {
       document.__ultremeSelectedQuoteHookInstalled = true;
