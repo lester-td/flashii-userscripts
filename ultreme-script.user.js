@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Flashii Chat - Ultreme Script
 // @namespace    https://patchii.net/lester/flashii-chat-userscripts
-// @version      5.5.3
+// @version      5.6.0
 // @description  Better quotes & delete button, quote blocks, upload progress bar, and Go to Forum button with settings.
 // @author       lester
 // @match        *://chat.flashii.net/*
@@ -23,9 +23,12 @@
   const ULTREME_MENU_ID = "ultreme";
   const DEFAULT_NAME_COLOR = "#ffffff";
   const DEFAULT_AVATAR_URL = "https://flashii.net/assets/avatar/";
-  const PATCHII_PAGE_URL = "https://patchii.net/lester/flashii-chat-userscripts";
-  const PATCHII_USERJS_URL = "https://patchii.net/lester/flashii-chat-userscripts/raw/branch/trunk/ultreme-script.user.js";
-  const PATCHII_META_URL = "https://patchii.net/lester/flashii-chat-userscripts/raw/branch/trunk/ultreme-script.meta.js";
+  const PATCHII_PAGE_URL =
+    "https://patchii.net/lester/flashii-chat-userscripts";
+  const PATCHII_USERJS_URL =
+    "https://patchii.net/lester/flashii-chat-userscripts/raw/branch/trunk/ultreme-script.user.js";
+  const PATCHII_META_URL =
+    "https://patchii.net/lester/flashii-chat-userscripts/raw/branch/trunk/ultreme-script.meta.js";
 
   const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
   const DEFAULT_UPLOAD_PROGRESS_BAR_WIDTH = 100;
@@ -71,13 +74,28 @@
   let enableDelete = loadBoolSetting("enableDelete", true);
   let showDeleteButton = loadBoolSetting("showDeleteButton", true);
   let enableQuoteBlocks = loadBoolSetting("enableQuoteBlocks", true);
-  let interceptNativeQuoteButton = loadBoolSetting("interceptNativeQuoteButton", true);
+  let interceptNativeQuoteButton = loadBoolSetting(
+    "interceptNativeQuoteButton",
+    true,
+  );
   let enableUploadProgress = loadBoolSetting("enableUploadProgress", true);
-  let uploadProgressTextMode = loadStringSetting("uploadProgressTextMode", "percent", ["percent", "size", "both"]);
-  let uploadProgressDisplayMode = loadStringSetting("uploadProgressDisplayMode", "combined", ["combined", "perfile"]);
+  let uploadProgressTextMode = loadStringSetting(
+    "uploadProgressTextMode",
+    "percent",
+    ["percent", "size", "both"],
+  );
+  let uploadProgressDisplayMode = loadStringSetting(
+    "uploadProgressDisplayMode",
+    "combined",
+    ["combined", "perfile"],
+  );
   let showUploadFileSize = loadBoolSetting("showUploadFileSize", true);
   let enableForumButton = loadBoolSetting("enableForumButton", true);
-  let enableJumpToBottomButton = loadBoolSetting("enableJumpToBottomButton", true);
+  let enableJumpToBottomButton = loadBoolSetting(
+    "enableJumpToBottomButton",
+    true,
+  );
+  let enableKonkira = loadBoolSetting("enableKonkira", true);
 
   let selectedText = "";
   let selectedQuoteData = null;
@@ -86,6 +104,7 @@
   let selectedMessageIndex = -1;
 
   const processedMessages = new WeakSet();
+  const konkiraStates = new Map();
   let mediaModal = null;
   const NativeXHR = W.XMLHttpRequest;
   const uploads = new Map();
@@ -108,7 +127,8 @@
 
   const getMessagesContainer = () => document.getElementById("umi-messages");
 
-  const getUploadPopupRoot = () => document.getElementById("upload-progress-popup");
+  const getUploadPopupRoot = () =>
+    document.getElementById("upload-progress-popup");
 
   const getCombinedUploadProgressElements = () => {
     const wrapper = document.getElementById("upload-progress-wrapper");
@@ -131,13 +151,16 @@
       ? DEFAULT_UPLOAD_PROGRESS_BAR_WIDTH
       : Math.max(
           DEFAULT_UPLOAD_PROGRESS_BAR_WIDTH,
-          measureUploadProgressTextWidth(barText) + UPLOAD_PROGRESS_BAR_TEXT_PADDING,
+          measureUploadProgressTextWidth(barText) +
+            UPLOAD_PROGRESS_BAR_TEXT_PADDING,
         );
 
   const getVisibleMessages = () => {
     const container = getMessagesContainer();
     if (!container) return [];
-    return [...container.children].filter((msg) => msg.classList.contains("message"));
+    return [...container.children].filter((msg) =>
+      msg.classList.contains("message"),
+    );
   };
 
   const rgbToHex = (rgb) => {
@@ -153,7 +176,9 @@
 
   const buildQuoteDataFromMessageElement = (msg, overrideText = null) => {
     const userEl = msg?.querySelector(".message__user");
-    const textEl = msg?.querySelector(".message__text") || msg?.querySelector(".message-tiny-text");
+    const textEl =
+      msg?.querySelector(".message__text") ||
+      msg?.querySelector(".message-tiny-text");
     if (!msg || !userEl || !textEl) return null;
 
     const dataCreated = msg.getAttribute("data-created");
@@ -309,7 +334,12 @@
   }
 
   function showCombinedUploadPreview() {
-    if (!enableUploadProgress || uploadProgressDisplayMode !== "combined" || uploads.size > 0) return;
+    if (
+      !enableUploadProgress ||
+      uploadProgressDisplayMode !== "combined" ||
+      uploads.size > 0
+    )
+      return;
 
     createProgressBar();
 
@@ -319,7 +349,10 @@
 
     const previewPercent = 64;
     const previewSizeText = "12.4 MB/19.6 MB";
-    const barText = getCombinedUploadProgressText(previewPercent, previewSizeText);
+    const barText = getCombinedUploadProgressText(
+      previewPercent,
+      previewSizeText,
+    );
     const barWidth = getCombinedUploadProgressBarWidth(barText);
 
     wrapper.style.opacity = "1";
@@ -327,7 +360,8 @@
     inner.style.width = `${previewPercent}%`;
     text.textContent = barText;
     sizeLabel.textContent = previewSizeText;
-    sizeLabel.style.display = uploadProgressTextMode === "percent" && showUploadFileSize ? "" : "none";
+    sizeLabel.style.display =
+      uploadProgressTextMode === "percent" && showUploadFileSize ? "" : "none";
 
     if (combinedUploadPreviewTimer) clearTimeout(combinedUploadPreviewTimer);
     combinedUploadPreviewTimer = setTimeout(() => {
@@ -341,7 +375,12 @@
     try {
       if (typeof body.entries === "function") {
         for (const [, value] of body.entries()) {
-          if (typeof File !== "undefined" && value instanceof File && value.name) return value.name;
+          if (
+            typeof File !== "undefined" &&
+            value instanceof File &&
+            value.name
+          )
+            return value.name;
         }
       }
     } catch {}
@@ -411,7 +450,12 @@
   }
 
   function showPerFileUploadPreview() {
-    if (!enableUploadProgress || uploadProgressDisplayMode !== "perfile" || uploads.size > 0) return;
+    if (
+      !enableUploadProgress ||
+      uploadProgressDisplayMode !== "perfile" ||
+      uploads.size > 0
+    )
+      return;
 
     const item = ensureUploadPopupItem("__preview__", "example-image.png");
     const popup = getUploadPopupRoot();
@@ -450,7 +494,10 @@
     else popup.style.opacity = "0";
 
     for (const [id, upload] of uploads.entries()) {
-      const percent = upload.total === 0 ? 0 : Math.round((upload.loaded / upload.total) * 100);
+      const percent =
+        upload.total === 0
+          ? 0
+          : Math.round((upload.loaded / upload.total) * 100);
       const item = ensureUploadPopupItem(id, upload.label || `Upload ${id}`);
       if (!item) continue;
 
@@ -519,7 +566,8 @@
       if (!done) allDone = false;
     }
 
-    const percent = totalSize === 0 ? 0 : Math.round((totalLoaded / totalSize) * 100);
+    const percent =
+      totalSize === 0 ? 0 : Math.round((totalLoaded / totalSize) * 100);
     const elements = getCombinedUploadProgressElements();
     if (!elements) return;
     const { wrapper, bar, inner, text, sizeLabel } = elements;
@@ -574,14 +622,28 @@
           const label = getUploadLabel(arguments[0], meta.id);
           if (uploadProgressDisplayMode === "combined") createProgressBar();
           else createUploadPopup();
-          uploads.set(meta.id, { loaded: 0, total: 0, done: false, label, dismissTimer: null });
+          uploads.set(meta.id, {
+            loaded: 0,
+            total: 0,
+            done: false,
+            label,
+            dismissTimer: null,
+          });
           refreshUploadProgressUI();
 
           if (this.upload && this.upload.addEventListener) {
             this.upload.addEventListener("progress", (e) => {
               if (e.lengthComputable) {
-                const current = uploads.get(meta.id) || { label, dismissTimer: null };
-                uploads.set(meta.id, { ...current, loaded: e.loaded, total: e.total, done: false });
+                const current = uploads.get(meta.id) || {
+                  label,
+                  dismissTimer: null,
+                };
+                uploads.set(meta.id, {
+                  ...current,
+                  loaded: e.loaded,
+                  total: e.total,
+                  done: false,
+                });
                 refreshUploadProgressUI();
               }
             });
@@ -618,7 +680,9 @@
     if (!enableForumButton) return;
 
     const sidebarSelector = document.querySelector(".sidebar__selector");
-    const firstButton = sidebarSelector?.querySelector(".sidebar__selector-mode");
+    const firstButton = sidebarSelector?.querySelector(
+      ".sidebar__selector-mode",
+    );
     if (!sidebarSelector || !firstButton) return;
     if (sidebarSelector.querySelector(".custom-button")) return;
 
@@ -636,7 +700,8 @@
       justify-content: center;
     `;
 
-    const favicon = document.querySelector('link[rel~="icon"]')?.href || "/favicon.ico";
+    const favicon =
+      document.querySelector('link[rel~="icon"]')?.href || "/favicon.ico";
     const faviconImg = document.createElement("img");
     faviconImg.src = favicon;
     faviconImg.alt = "Flashii Forum";
@@ -661,17 +726,24 @@
     if (!messages) return;
 
     messages.scrollTop = messages.scrollHeight;
-    document.getElementById("umi-messages-anchor")?.scrollIntoView({ block: "end" });
+    document
+      .getElementById("umi-messages-anchor")
+      ?.scrollIntoView({ block: "end" });
   }
 
   function addJumpToBottomButton() {
     if (!enableJumpToBottomButton) return;
 
     const sidebarSelector = document.querySelector(".sidebar__selector");
-    if (!sidebarSelector || document.getElementById("ultreme-jump-bottom-button")) return;
+    if (
+      !sidebarSelector ||
+      document.getElementById("ultreme-jump-bottom-button")
+    )
+      return;
 
-    const scrollModeButton = [...sidebarSelector.querySelectorAll(".sidebar__selector-mode")]
-      .find((button) => button.title === "Scroll mode");
+    const scrollModeButton = [
+      ...sidebarSelector.querySelectorAll(".sidebar__selector-mode"),
+    ].find((button) => button.title === "Scroll mode");
 
     const newButton = document.createElement("button");
     newButton.id = "ultreme-jump-bottom-button";
@@ -702,14 +774,19 @@
     const n = text.length;
     if (n <= limit) return text;
     if (n <= limit + spill) {
-      if (!isWhiteSpace(text[limit]) && !isWhiteSpace(text[limit - 1])) return text;
+      if (!isWhiteSpace(text[limit]) && !isWhiteSpace(text[limit - 1]))
+        return text;
     }
 
     let startEnd = Math.min(edge, n);
     if (!isWhiteSpace(text[startEnd]) && !isWhiteSpace(text[startEnd - 1])) {
       const before = text.lastIndexOf(" ", startEnd);
       const after = text.indexOf(" ", startEnd);
-      if (before !== -1 && (after === -1 || startEnd - before <= after - startEnd)) startEnd = before;
+      if (
+        before !== -1 &&
+        (after === -1 || startEnd - before <= after - startEnd)
+      )
+        startEnd = before;
       else if (after !== -1) startEnd = after;
     }
     if (startEnd <= 0) startEnd = Math.min(edge, n);
@@ -734,7 +811,10 @@
     if (endQuoteIdx !== -1) msgText = msgText.slice(endQuoteIdx + 8).trim();
     return msgText
       .replace(/\[Embed\]|\[Remove\]/g, "")
-      .replace(/\[color=var\(--theme-colour-message-time-colour\)\][^\w\[\]]{1,3}\[\/color\]/g, "")
+      .replace(
+        /\[color=var\(--theme-colour-message-time-colour\)\][^\w\[\]]{1,3}\[\/color\]/g,
+        "",
+      )
       .trim();
   }
 
@@ -758,24 +838,41 @@
 
   const getAvatarUrl = (authorId, avatarVersion = null) => {
     if (!authorId) return DEFAULT_AVATAR_URL;
-    if (avatarVersion) return `${DEFAULT_AVATAR_URL}${authorId}?ver=${avatarVersion}`;
+    if (avatarVersion)
+      return `${DEFAULT_AVATAR_URL}${authorId}?ver=${avatarVersion}`;
     return `${DEFAULT_AVATAR_URL}${authorId}`;
   };
 
   const parseQuoteHref = (href) => {
-    const m = String(href || "").match(/^#(\d{17})(?::([^:#\s]+))?(?::([^#\s]+))?$/);
+    const m = String(href || "").match(
+      /^#(\d{17})(?::([^:#\s]+))?(?::([^#\s]+))?$/,
+    );
     if (!m) return { messageId: null, authorId: null, avatarVersion: null };
-    return { messageId: m[1], authorId: m[2] || null, avatarVersion: m[3] || null };
+    return {
+      messageId: m[1],
+      authorId: m[2] || null,
+      avatarVersion: m[3] || null,
+    };
   };
 
   const extractAvatarVersion = (msg) => {
-    const bg = msg.querySelector(".message__avatar")?.style?.backgroundImage || "";
+    const bg =
+      msg.querySelector(".message__avatar")?.style?.backgroundImage || "";
     const m = bg.match(/[?&]ver=(\d+)/);
     return m ? m[1] : null;
   };
 
   const VIDEO_EXTS = ["mp4", "webm", "ogg"];
-  const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif", "svg"];
+  const IMAGE_EXTS = [
+    "png",
+    "jpg",
+    "jpeg",
+    "gif",
+    "webp",
+    "bmp",
+    "avif",
+    "svg",
+  ];
   const AUDIO_EXTS = ["mp3", "wav", "flac", "aac", "m4a", "opus", "oga"];
 
   const getMediaKind = (url) => {
@@ -847,7 +944,12 @@
       toggle.textContent = "Remove";
     });
 
-    wrapper.append(document.createTextNode("["), toggle, document.createTextNode("]"), embed);
+    wrapper.append(
+      document.createTextNode("["),
+      toggle,
+      document.createTextNode("]"),
+      embed,
+    );
     return wrapper;
   };
 
@@ -879,11 +981,23 @@
 
     let text = cleanMessage(msg);
 
-    text = text.replace(/\[img\]([\s\S]*?)\[\/img\]/gi, (_, url) => stash(buildPreviewMediaLink(url, "image")));
-    text = text.replace(/\[video\]([\s\S]*?)\[\/video\]/gi, (_, url) => stash(buildPreviewMediaLink(url, "video")));
-    text = text.replace(/\[audio\]([\s\S]*?)\[\/audio\]/gi, (_, url) => stash(buildPreviewMediaLink(url, "audio")));
-    text = text.replace(/\[code\]([\s\S]*?)\[\/code\]/gi, (_, code) => stash(`<code>${escapeHtml(code)}</code>`));
-    text = text.replace(/\[spoiler\]([\s\S]*?)\[\/spoiler\]/gi, (_, spoiler) => stash(`<span class="ultreme-preview-spoiler">${escapeHtml(spoiler)}</span>`));
+    text = text.replace(/\[img\]([\s\S]*?)\[\/img\]/gi, (_, url) =>
+      stash(buildPreviewMediaLink(url, "image")),
+    );
+    text = text.replace(/\[video\]([\s\S]*?)\[\/video\]/gi, (_, url) =>
+      stash(buildPreviewMediaLink(url, "video")),
+    );
+    text = text.replace(/\[audio\]([\s\S]*?)\[\/audio\]/gi, (_, url) =>
+      stash(buildPreviewMediaLink(url, "audio")),
+    );
+    text = text.replace(/\[code\]([\s\S]*?)\[\/code\]/gi, (_, code) =>
+      stash(`<code>${escapeHtml(code)}</code>`),
+    );
+    text = text.replace(/\[spoiler\]([\s\S]*?)\[\/spoiler\]/gi, (_, spoiler) =>
+      stash(
+        `<span class="ultreme-preview-spoiler">${escapeHtml(spoiler)}</span>`,
+      ),
+    );
     text = text.replace(/\[quote\]([\s\S]*?)\[\/quote\]/gi, "$1");
 
     text = escapeHtml(text);
@@ -901,7 +1015,10 @@
     text = text.replace(/\[\/s\]/gi, "</s>");
     text = text.replace(/\[color=([^\]]+)\]/gi, (_, color) => {
       const value = String(color || "").trim();
-      if (/^#(?:[0-9a-f]{3,8})$/i.test(value) || /^var\(--[a-z0-9-]+\)$/i.test(value)) {
+      if (
+        /^#(?:[0-9a-f]{3,8})$/i.test(value) ||
+        /^var\(--[a-z0-9-]+\)$/i.test(value)
+      ) {
         return `<span style="color:${value};">`;
       }
       return "<span>";
@@ -910,7 +1027,10 @@
 
     text = text.replace(/\[(?:\/)?[a-z]+(?:=[^\]]+)?\]/gi, "");
 
-    text = text.replace(/\uE000(\d+)\uE001/g, (_, idx) => placeholders[Number(idx)] || "");
+    text = text.replace(
+      /\uE000(\d+)\uE001/g,
+      (_, idx) => placeholders[Number(idx)] || "",
+    );
 
     return text;
   };
@@ -952,7 +1072,12 @@
       }
 
       if (event.target?.closest?.(".umi-media-modal-toolbar")) return;
-      if (event.target?.closest?.(".umi-media-modal-content img, .umi-media-modal-content video")) return;
+      if (
+        event.target?.closest?.(
+          ".umi-media-modal-content img, .umi-media-modal-content video",
+        )
+      )
+        return;
 
       closeMediaModal();
     });
@@ -1006,10 +1131,12 @@
 
   const getInstalledVersion = () => {
     try {
-      if (typeof GM_info !== "undefined" && GM_info?.script?.version) return String(GM_info.script.version);
+      if (typeof GM_info !== "undefined" && GM_info?.script?.version)
+        return String(GM_info.script.version);
     } catch {}
     try {
-      if (typeof GM !== "undefined" && GM?.info?.script?.version) return String(GM.info.script.version);
+      if (typeof GM !== "undefined" && GM?.info?.script?.version)
+        return String(GM.info.script.version);
     } catch {}
     return null;
   };
@@ -1038,7 +1165,10 @@
     new Promise((resolve, reject) => {
       const bust = `${url}${url.includes("?") ? "&" : "?"}_=${Date.now()}`;
 
-      if (typeof GM !== "undefined" && typeof GM.xmlHttpRequest === "function") {
+      if (
+        typeof GM !== "undefined" &&
+        typeof GM.xmlHttpRequest === "function"
+      ) {
         GM.xmlHttpRequest({
           method: "GET",
           url: bust,
@@ -1079,7 +1209,8 @@
     if (!form || !main) return;
 
     const quotePreview = document.getElementById("quote-preview");
-    if (quotePreview && quotePreview.parentElement === form) form.insertBefore(el, quotePreview);
+    if (quotePreview && quotePreview.parentElement === form)
+      form.insertBefore(el, quotePreview);
     else form.insertBefore(el, main);
   };
 
@@ -1199,7 +1330,10 @@
     const sourceMessage =
       range?.commonAncestorContainer?.closest?.(".message") ||
       range?.commonAncestorContainer?.parentElement?.closest?.(".message");
-    selectedQuoteData = selectedText && sourceMessage ? buildQuoteDataFromMessageElement(sourceMessage, selectedText) : null;
+    selectedQuoteData =
+      selectedText && sourceMessage
+        ? buildQuoteDataFromMessageElement(sourceMessage, selectedText)
+        : null;
   });
 
   document.addEventListener("click", (e) => {
@@ -1209,16 +1343,25 @@
     const previewMediaLink = t.closest(".ultreme-preview-media");
     if (previewMediaLink instanceof HTMLAnchorElement) {
       e.preventDefault();
-      openMediaModal(previewMediaLink.dataset.mediaUrl || previewMediaLink.href);
+      openMediaModal(
+        previewMediaLink.dataset.mediaUrl || previewMediaLink.href,
+      );
       return;
     }
 
-    if (!interceptNativeQuoteButton && t.matches("button.markup__button") && t.textContent.trim().toLowerCase() === "quote") {
+    if (
+      !interceptNativeQuoteButton &&
+      t.matches("button.markup__button") &&
+      t.textContent.trim().toLowerCase() === "quote"
+    ) {
       setTimeout(() => {
         const input = document.querySelector("textarea.input__text");
         if (input && selectedText) {
           const quoted = `[quote]${selectedText}[/quote]`;
-          input.value = input.value.trim() === "[quote][/quote]" ? quoted : input.value + quoted;
+          input.value =
+            input.value.trim() === "[quote][/quote]"
+              ? quoted
+              : input.value + quoted;
           input.focus();
           selectedText = "";
           selectedQuoteData = null;
@@ -1233,7 +1376,11 @@
       const t = e.target;
       if (!(t instanceof Element)) return;
       if (!interceptNativeQuoteButton || !selectedQuoteData) return;
-      if (!t.matches("button.markup__button") || t.textContent.trim().toLowerCase() !== "quote") return;
+      if (
+        !t.matches("button.markup__button") ||
+        t.textContent.trim().toLowerCase() !== "quote"
+      )
+        return;
 
       e.preventDefault();
       e.stopPropagation();
@@ -1266,6 +1413,45 @@
       if (minutes < 60) return `${minutes}m ago`;
       if (hours < 24) return `${hours}h ${minutes % 60}m ago`;
       return `${days}d ${hours % 24}h ${minutes % 60}m ago`;
+    };
+
+    const applyKonkira = (msg, userId, type) => {
+      const u_state = konkiraStates.get(userId);
+      if (u_state) {
+        if (u_state.el && u_state.el.parentNode) {
+          u_state.el.remove();
+        }
+        const n_cnt = u_state.cnt + 1;
+        msg.classList.add("konkira-summary");
+        msg.setAttribute("konkira-count", n_cnt);
+        const t_el =
+          msg.querySelector(".message__text") ||
+          msg.querySelector(".message-tiny-text");
+        if (t_el) {
+          if (n_cnt === 2 && u_state.start_t === "join" && type === "leave") {
+            t_el.innerHTML = `&nbsp;lurked`;
+          } else if (
+            n_cnt === 2 &&
+            u_state.start_t === "leave" &&
+            type === "join"
+          ) {
+            t_el.innerHTML = `&nbsp;rejoined`;
+          } else {
+            t_el.innerHTML = `&nbsp;is jittery<span class="connection-badge">x${n_cnt}</span>`;
+          }
+        }
+        konkiraStates.set(userId, {
+          cnt: n_cnt,
+          el: msg,
+          start_t: u_state.start_t,
+        });
+      } else {
+        konkiraStates.set(userId, {
+          cnt: 1,
+          el: msg,
+          start_t: type,
+        });
+      }
     };
 
     const injectCSS = () => {
@@ -1879,6 +2065,15 @@
             var(--theme-colour-main-accent)
           );
         }
+        .message.konkira-summary .connection-badge {
+          display: inline-block;
+          background: #282828;
+          border-radius: 4px;
+          padding: 1px 5px;
+          margin-left: 6px;
+          font-weight: bold;
+          font-size: 0.85em;
+        }
       `;
       document.head.appendChild(style);
     };
@@ -1958,7 +2153,10 @@
 
     const extractMessageData = (msg) => buildQuoteDataFromMessageElement(msg);
 
-    const appendMessageButton = (container, { className, text, title, visible = true, onClick, html = false }) => {
+    const appendMessageButton = (
+      container,
+      { className, text, title, visible = true, onClick, html = false },
+    ) => {
       const button = document.createElement("button");
       button.className = className;
       if (html) button.innerHTML = text;
@@ -1983,9 +2181,15 @@
       if (aText.length !== 1 || aText.charCodeAt(0) !== 0x200c) return;
 
       const href = anchor.getAttribute("href") || "";
-      const { messageId: targetId, authorId: quotedAuthorIdFromHref, avatarVersion: quotedAvatarVersion } = parseQuoteHref(href);
+      const {
+        messageId: targetId,
+        authorId: quotedAuthorIdFromHref,
+        avatarVersion: quotedAvatarVersion,
+      } = parseQuoteHref(href);
 
-      const arrowSpan = [...textEl.querySelectorAll("span")].find((s) => (s.textContent || "").includes("└"));
+      const arrowSpan = [...textEl.querySelectorAll("span")].find((s) =>
+        (s.textContent || "").includes("└"),
+      );
       const br = textEl.querySelector("br");
 
       metaI.classList.add("ultreme-inline-quote");
@@ -1998,7 +2202,9 @@
         quoteBr.before(document.createTextNode(" "));
       });
 
-      const targetMsg = targetId ? document.getElementById(`message-${targetId}`) : null;
+      const targetMsg = targetId
+        ? document.getElementById(`message-${targetId}`)
+        : null;
 
       const quoteContainer = document.createElement("div");
       quoteContainer.className = "message__quote";
@@ -2032,22 +2238,35 @@
         const targetName = targetUserEl?.textContent?.trim();
         if (targetName) quotedName = targetName;
         if (rawColor && rawColor !== "inherit") {
-          quotedColor = rawColor.startsWith("#") ? rawColor : rgbToHex(rawColor);
+          quotedColor = rawColor.startsWith("#")
+            ? rawColor
+            : rgbToHex(rawColor);
         }
         quotedCreated = targetMsg.getAttribute("data-created");
       } else {
         const nameB = metaI.querySelector("b");
-        const colourSource = metaI.querySelector('span[style*="color"]') || nameB?.parentElement || nameB;
+        const colourSource =
+          metaI.querySelector('span[style*="color"]') ||
+          nameB?.parentElement ||
+          nameB;
         const rawColor = colourSource?.style?.color || null;
         if (rawColor && rawColor !== "inherit") {
-          quotedColor = rawColor.startsWith("#") ? rawColor : rgbToHex(rawColor);
+          quotedColor = rawColor.startsWith("#")
+            ? rawColor
+            : rgbToHex(rawColor);
         }
       }
 
-      const quotedAuthorId = targetMsg?.dataset?.author || quotedAuthorIdFromHref;
-      const quotedAvatarVersionLive = targetMsg ? extractAvatarVersion(targetMsg) : null;
+      const quotedAuthorId =
+        targetMsg?.dataset?.author || quotedAuthorIdFromHref;
+      const quotedAvatarVersionLive = targetMsg
+        ? extractAvatarVersion(targetMsg)
+        : null;
       if (quotedAuthorId) {
-        avatarImg.src = getAvatarUrl(quotedAuthorId, quotedAvatarVersionLive || quotedAvatarVersion);
+        avatarImg.src = getAvatarUrl(
+          quotedAuthorId,
+          quotedAvatarVersionLive || quotedAvatarVersion,
+        );
       }
 
       if (!relTime && quotedCreated) relTime = getRelativeTime(quotedCreated);
@@ -2060,7 +2279,9 @@
       header.dataset.quoteTime = relTime;
       const showColor = quotedColor || DEFAULT_NAME_COLOR;
       header.innerHTML = `<b style="color:${showColor};">${quotedName}</b>${
-        relTime ? ` <span style="color:var(--theme-colour-message-time-colour);">@ ${relTime}</span>` : ""
+        relTime
+          ? ` <span style="color:var(--theme-colour-message-time-colour);">@ ${relTime}</span>`
+          : ""
       }`;
 
       const textDiv = document.createElement("div");
@@ -2152,7 +2373,8 @@
           }
         }
 
-        if (textEl.parentNode === bodyWrapper) bodyWrapper.insertBefore(quoteContainer, textEl);
+        if (textEl.parentNode === bodyWrapper)
+          bodyWrapper.insertBefore(quoteContainer, textEl);
         else bodyWrapper.insertBefore(quoteContainer, bodyWrapper.firstChild);
       } else if (meta?.parentNode) {
         meta.parentNode.insertBefore(quoteContainer, meta.nextSibling);
@@ -2160,7 +2382,12 @@
 
       if (targetId) {
         quoteContainer.addEventListener("click", (ev) => {
-          if (ev.target?.closest?.(".message__quote-media, .message__quote-embed-toggle, .message__quote-embed")) return;
+          if (
+            ev.target?.closest?.(
+              ".message__quote-media, .message__quote-embed-toggle, .message__quote-embed",
+            )
+          )
+            return;
           scrollToMessageId(targetId);
         });
       }
@@ -2179,7 +2406,9 @@
       } catch {}
 
       const panel = document.getElementById(`umi-menus-${ULTREME_MENU_ID}`);
-      const iconHost = document.getElementById(`umi-menu-icons-${ULTREME_MENU_ID}`);
+      const iconHost = document.getElementById(
+        `umi-menu-icons-${ULTREME_MENU_ID}`,
+      );
       if (!panel || !iconHost) return false;
 
       if (!iconHost.querySelector(".fa-code")) {
@@ -2190,7 +2419,10 @@
 
       if (!panel.__ultremeBuilt) {
         panel.__ultremeBuilt = true;
-        panel.classList.add("sidebar__menu--settings", "sidebar__menu--userscript");
+        panel.classList.add(
+          "sidebar__menu--settings",
+          "sidebar__menu--userscript",
+        );
 
         const createCategory = (titleText) => {
           const wrapper = document.createElement("div");
@@ -2279,7 +2511,8 @@
 
         const addCheckbox = (body, cls, labelText) => {
           const container = document.createElement("div");
-          container.className = "setting__container setting__container--checkbox";
+          container.className =
+            "setting__container setting__container--checkbox";
 
           const label = document.createElement("label");
           label.className = "setting__label";
@@ -2299,7 +2532,8 @@
 
         const addRadio = (body, groupName, cls, labelText) => {
           const container = document.createElement("div");
-          container.className = "setting__container setting__container--checkbox";
+          container.className =
+            "setting__container setting__container--checkbox";
 
           const label = document.createElement("label");
           label.className = "setting__label";
@@ -2318,7 +2552,13 @@
           return input;
         };
 
-        const bindCheckboxSetting = (input, key, getValue, setValue, onChange) => {
+        const bindCheckboxSetting = (
+          input,
+          key,
+          getValue,
+          setValue,
+          onChange,
+        ) => {
           input.checked = getValue();
           input.addEventListener("change", () => {
             const nextValue = input.checked;
@@ -2339,10 +2579,17 @@
           return { wrap, btn };
         };
 
-        const bindRadioSetting = (inputs, key, getValue, setValue, onChange) => {
+        const bindRadioSetting = (
+          inputs,
+          key,
+          getValue,
+          setValue,
+          onChange,
+        ) => {
           const sync = () => {
             const value = getValue();
-            for (const [radioValue, input] of Object.entries(inputs)) input.checked = value === radioValue;
+            for (const [radioValue, input] of Object.entries(inputs))
+              input.checked = value === radioValue;
           };
 
           sync();
@@ -2363,22 +2610,57 @@
         const aboutBody = createCategory("About");
         aboutBody.classList.add("ultreme-about");
 
-        const showQuoteButtonInput = addCheckbox(quotingBody, "js-ultreme-showQuoteButton", 'Show "Quote" button');
-        const showGotoButtonInput = addCheckbox(quotingBody, "js-ultreme-showGotoButton", 'Show "Go to quote" button');
-        const enableQuoteBlocksInput = addCheckbox(quotingBody, "js-ultreme-enableQuoteBlocks", "Render quotes as blocks");
+        const showQuoteButtonInput = addCheckbox(
+          quotingBody,
+          "js-ultreme-showQuoteButton",
+          'Show "Quote" button',
+        );
+        const showGotoButtonInput = addCheckbox(
+          quotingBody,
+          "js-ultreme-showGotoButton",
+          'Show "Go to quote" button',
+        );
+        const enableQuoteBlocksInput = addCheckbox(
+          quotingBody,
+          "js-ultreme-enableQuoteBlocks",
+          "Render quotes as blocks",
+        );
         const interceptNativeQuoteButtonInput = addCheckbox(
           quotingBody,
           "js-ultreme-interceptNativeQuoteButton",
           'Rich partial quotes with bbcode "Quote" button',
         );
 
-        addHint(deletingBody, "Hold shift and click your message's timestamp to delete");
-        const enableDeleteInput = addCheckbox(deletingBody, "js-ultreme-enableDelete", "Enable Delete");
-        const showDeleteButtonInput = addCheckbox(deletingBody, "js-ultreme-showDeleteButton", "Show Delete button");
+        addHint(
+          deletingBody,
+          "Hold shift and click your message's timestamp to delete",
+        );
+        const enableDeleteInput = addCheckbox(
+          deletingBody,
+          "js-ultreme-enableDelete",
+          "Enable Delete",
+        );
+        const showDeleteButtonInput = addCheckbox(
+          deletingBody,
+          "js-ultreme-showDeleteButton",
+          "Show Delete button",
+        );
+        const enableKonkiraInput = addCheckbox(
+          miscBody,
+          "js-ultreme-enableKonkira",
+          "Compact join/leave messages",
+        );
 
         const uploadGroup = createSettingGroup(miscBody, "Upload Progress");
-        const enableUploadProgressInput = addCheckbox(uploadGroup, "js-ultreme-enableUploadProgress", "Show upload progress bar");
-        const uploadDisplaySection = createSettingSubsection(uploadGroup, "Display");
+        const enableUploadProgressInput = addCheckbox(
+          uploadGroup,
+          "js-ultreme-enableUploadProgress",
+          "Show upload progress bar",
+        );
+        const uploadDisplaySection = createSettingSubsection(
+          uploadGroup,
+          "Display",
+        );
         const uploadDisplayPerFileInput = addRadio(
           uploadDisplaySection.group,
           "ultreme-upload-progress-display-mode",
@@ -2391,29 +2673,60 @@
           "js-ultreme-uploadProgressDisplayCombined",
           "Combined bar",
         );
-        const uploadInsideSection = createSettingSubsection(uploadGroup, "Inside Bar Text");
+        const uploadInsideSection = createSettingSubsection(
+          uploadGroup,
+          "Inside Bar Text",
+        );
         const uploadProgressPercentInput = addRadio(
           uploadInsideSection.group,
           "ultreme-upload-progress-text-mode",
           "js-ultreme-uploadProgressPercent",
           "Percentage",
         );
-        const uploadProgressSizeInput = addRadio(uploadInsideSection.group, "ultreme-upload-progress-text-mode", "js-ultreme-uploadProgressSize", "File size");
-        const uploadProgressBothInput = addRadio(uploadInsideSection.group, "ultreme-upload-progress-text-mode", "js-ultreme-uploadProgressBoth", "Both");
-        const uploadOutsideSection = createSettingSubsection(uploadGroup, "Outside Bar Text");
-        const showUploadFileSizeInput = addCheckbox(uploadOutsideSection.group, "js-ultreme-showUploadFileSize", "File size");
+        const uploadProgressSizeInput = addRadio(
+          uploadInsideSection.group,
+          "ultreme-upload-progress-text-mode",
+          "js-ultreme-uploadProgressSize",
+          "File size",
+        );
+        const uploadProgressBothInput = addRadio(
+          uploadInsideSection.group,
+          "ultreme-upload-progress-text-mode",
+          "js-ultreme-uploadProgressBoth",
+          "Both",
+        );
+        const uploadOutsideSection = createSettingSubsection(
+          uploadGroup,
+          "Outside Bar Text",
+        );
+        const showUploadFileSizeInput = addCheckbox(
+          uploadOutsideSection.group,
+          "js-ultreme-showUploadFileSize",
+          "File size",
+        );
 
         const navigationGroup = createSettingGroup(miscBody, "Navigation");
-        const enableForumButtonInput = addCheckbox(navigationGroup, "js-ultreme-enableForumButton", "Show Flashii logo (Go to Forum) button");
-        const enableJumpToBottomButtonInput = addCheckbox(navigationGroup, "js-ultreme-enableJumpToBottomButton", "Show Jump to bottom button");
+        const enableForumButtonInput = addCheckbox(
+          navigationGroup,
+          "js-ultreme-enableForumButton",
+          "Show Flashii logo (Go to Forum) button",
+        );
+        const enableJumpToBottomButtonInput = addCheckbox(
+          navigationGroup,
+          "js-ultreme-enableJumpToBottomButton",
+          "Show Jump to bottom button",
+        );
 
         const syncUploadFileSizeControls = () => {
           const sizeLabel = document.getElementById("upload-progress-size");
-          const useCombinedBar = enableUploadProgress && uploadProgressDisplayMode === "combined";
+          const useCombinedBar =
+            enableUploadProgress && uploadProgressDisplayMode === "combined";
           const disableUploadDisplayControls = !enableUploadProgress;
           const disableUploadTextControls = !useCombinedBar;
-          const disableSideSize = !useCombinedBar || uploadProgressTextMode !== "percent";
-          const sideSizeLabel = showUploadFileSizeInput.closest(".setting__label");
+          const disableSideSize =
+            !useCombinedBar || uploadProgressTextMode !== "percent";
+          const sideSizeLabel =
+            showUploadFileSizeInput.closest(".setting__label");
           const displayModeLabels = [
             uploadDisplayCombinedInput.closest(".setting__label"),
             uploadDisplayPerFileInput.closest(".setting__label"),
@@ -2424,21 +2737,36 @@
             uploadProgressBothInput.closest(".setting__label"),
           ];
 
-          for (const input of [uploadDisplayCombinedInput, uploadDisplayPerFileInput]) {
+          for (const input of [
+            uploadDisplayCombinedInput,
+            uploadDisplayPerFileInput,
+          ]) {
             input.disabled = disableUploadDisplayControls;
           }
           for (const label of displayModeLabels) {
-            label?.classList.toggle("ultreme-setting-disabled", disableUploadDisplayControls);
+            label?.classList.toggle(
+              "ultreme-setting-disabled",
+              disableUploadDisplayControls,
+            );
           }
-          for (const input of [uploadProgressPercentInput, uploadProgressSizeInput, uploadProgressBothInput]) {
+          for (const input of [
+            uploadProgressPercentInput,
+            uploadProgressSizeInput,
+            uploadProgressBothInput,
+          ]) {
             input.disabled = disableUploadTextControls;
           }
           for (const label of uploadTextLabels) {
-            label?.classList.toggle("ultreme-setting-disabled", disableUploadTextControls);
+            label?.classList.toggle(
+              "ultreme-setting-disabled",
+              disableUploadTextControls,
+            );
           }
 
-          uploadInsideSection.wrap.style.display = uploadProgressDisplayMode === "combined" ? "" : "none";
-          uploadOutsideSection.wrap.style.display = uploadProgressDisplayMode === "combined" ? "" : "none";
+          uploadInsideSection.wrap.style.display =
+            uploadProgressDisplayMode === "combined" ? "" : "none";
+          uploadOutsideSection.wrap.style.display =
+            uploadProgressDisplayMode === "combined" ? "" : "none";
 
           if (!enableUploadProgress && uploadProgressTextMode !== "percent") {
             uploadProgressTextMode = "percent";
@@ -2446,39 +2774,77 @@
             uploadProgressPercentInput.checked = true;
           }
 
-          if ((!enableUploadProgress || (useCombinedBar && uploadProgressTextMode !== "percent")) && showUploadFileSize) {
+          if (
+            (!enableUploadProgress ||
+              (useCombinedBar && uploadProgressTextMode !== "percent")) &&
+            showUploadFileSize
+          ) {
             showUploadFileSize = false;
             saveBoolSetting("showUploadFileSize", false);
             showUploadFileSizeInput.checked = false;
           }
 
           showUploadFileSizeInput.disabled = disableSideSize;
-          sideSizeLabel?.classList.toggle("ultreme-setting-disabled", disableSideSize);
+          sideSizeLabel?.classList.toggle(
+            "ultreme-setting-disabled",
+            disableSideSize,
+          );
 
-          if (sizeLabel) sizeLabel.style.display = useCombinedBar && !disableSideSize && showUploadFileSize ? "" : "none";
+          if (sizeLabel)
+            sizeLabel.style.display =
+              useCombinedBar && !disableSideSize && showUploadFileSize
+                ? ""
+                : "none";
         };
 
-        bindCheckboxSetting(showQuoteButtonInput, "showQuoteButton", () => showQuoteButton, (v) => {
-          showQuoteButton = v;
-        }, (v) => {
-          document.querySelectorAll(".quote-button").forEach((btn) => (btn.style.display = v ? "" : "none"));
-        });
+        bindCheckboxSetting(
+          showQuoteButtonInput,
+          "showQuoteButton",
+          () => showQuoteButton,
+          (v) => {
+            showQuoteButton = v;
+          },
+          (v) => {
+            document
+              .querySelectorAll(".quote-button")
+              .forEach((btn) => (btn.style.display = v ? "" : "none"));
+          },
+        );
 
-        bindCheckboxSetting(showGotoButtonInput, "showGotoButton", () => showGotoButton, (v) => {
-          showGotoButton = v;
-        }, (v) => {
-          document.querySelectorAll(".goto-button").forEach((btn) => (btn.style.display = v ? "" : "none"));
-        });
+        bindCheckboxSetting(
+          showGotoButtonInput,
+          "showGotoButton",
+          () => showGotoButton,
+          (v) => {
+            showGotoButton = v;
+          },
+          (v) => {
+            document
+              .querySelectorAll(".goto-button")
+              .forEach((btn) => (btn.style.display = v ? "" : "none"));
+          },
+        );
 
-        bindCheckboxSetting(enableQuoteBlocksInput, "enableQuoteBlocks", () => enableQuoteBlocks, (v) => {
-          enableQuoteBlocks = v;
-        }, (v) => {
-          document.body.dataset.ultremeQuoteBlocks = v ? "1" : "0";
-        });
+        bindCheckboxSetting(
+          enableQuoteBlocksInput,
+          "enableQuoteBlocks",
+          () => enableQuoteBlocks,
+          (v) => {
+            enableQuoteBlocks = v;
+          },
+          (v) => {
+            document.body.dataset.ultremeQuoteBlocks = v ? "1" : "0";
+          },
+        );
 
-        bindCheckboxSetting(interceptNativeQuoteButtonInput, "interceptNativeQuoteButton", () => interceptNativeQuoteButton, (v) => {
-          interceptNativeQuoteButton = v;
-        });
+        bindCheckboxSetting(
+          interceptNativeQuoteButtonInput,
+          "interceptNativeQuoteButton",
+          () => interceptNativeQuoteButton,
+          (v) => {
+            interceptNativeQuoteButton = v;
+          },
+        );
 
         const syncDeleteButtons = () => {
           document.querySelectorAll(".delete-button").forEach((btn) => {
@@ -2486,25 +2852,55 @@
           });
         };
 
-        bindCheckboxSetting(enableDeleteInput, "enableDelete", () => enableDelete, (v) => {
-          enableDelete = v;
-        }, syncDeleteButtons);
+        bindCheckboxSetting(
+          enableDeleteInput,
+          "enableDelete",
+          () => enableDelete,
+          (v) => {
+            enableDelete = v;
+          },
+          syncDeleteButtons,
+        );
 
-        bindCheckboxSetting(showDeleteButtonInput, "showDeleteButton", () => showDeleteButton, (v) => {
-          showDeleteButton = v;
-        }, syncDeleteButtons);
+        bindCheckboxSetting(
+          showDeleteButtonInput,
+          "showDeleteButton",
+          () => showDeleteButton,
+          (v) => {
+            showDeleteButton = v;
+          },
+          syncDeleteButtons,
+        );
 
-        bindCheckboxSetting(enableUploadProgressInput, "enableUploadProgress", () => enableUploadProgress, (v) => {
-          enableUploadProgress = v;
-        }, (v) => {
-          if (!v) {
-            disableUploadProgressUI();
-          } else {
-            refreshUploadProgressUI();
-            showUploadProgressPreview();
-          }
-          syncUploadFileSizeControls();
-        });
+        bindCheckboxSetting(
+          enableKonkiraInput,
+          "enableKonkira",
+          () => enableKonkira,
+          (v) => {
+            enableKonkira = v;
+          },
+          (v) => {
+            if (!v) konkiraStates.clear();
+          },
+        );
+
+        bindCheckboxSetting(
+          enableUploadProgressInput,
+          "enableUploadProgress",
+          () => enableUploadProgress,
+          (v) => {
+            enableUploadProgress = v;
+          },
+          (v) => {
+            if (!v) {
+              disableUploadProgressUI();
+            } else {
+              refreshUploadProgressUI();
+              showUploadProgressPreview();
+            }
+            syncUploadFileSizeControls();
+          },
+        );
 
         bindRadioSetting(
           {
@@ -2542,34 +2938,55 @@
           },
         );
 
-        bindCheckboxSetting(showUploadFileSizeInput, "showUploadFileSize", () => showUploadFileSize, (v) => {
-          showUploadFileSize = v;
-        }, (v) => {
-          const sizeLabel = document.getElementById("upload-progress-size");
-          if (sizeLabel) {
-            sizeLabel.style.display =
-              enableUploadProgress && uploadProgressDisplayMode === "combined" && uploadProgressTextMode === "percent" && v
-                ? ""
-                : "none";
-          }
-          showUploadProgressPreview();
-        });
+        bindCheckboxSetting(
+          showUploadFileSizeInput,
+          "showUploadFileSize",
+          () => showUploadFileSize,
+          (v) => {
+            showUploadFileSize = v;
+          },
+          (v) => {
+            const sizeLabel = document.getElementById("upload-progress-size");
+            if (sizeLabel) {
+              sizeLabel.style.display =
+                enableUploadProgress &&
+                uploadProgressDisplayMode === "combined" &&
+                uploadProgressTextMode === "percent" &&
+                v
+                  ? ""
+                  : "none";
+            }
+            showUploadProgressPreview();
+          },
+        );
 
         syncUploadFileSizeControls();
 
-        bindCheckboxSetting(enableForumButtonInput, "enableForumButton", () => enableForumButton, (v) => {
-          enableForumButton = v;
-        }, (v) => {
-          if (v) addForumButton();
-          else removeForumButton();
-        });
+        bindCheckboxSetting(
+          enableForumButtonInput,
+          "enableForumButton",
+          () => enableForumButton,
+          (v) => {
+            enableForumButton = v;
+          },
+          (v) => {
+            if (v) addForumButton();
+            else removeForumButton();
+          },
+        );
 
-        bindCheckboxSetting(enableJumpToBottomButtonInput, "enableJumpToBottomButton", () => enableJumpToBottomButton, (v) => {
-          enableJumpToBottomButton = v;
-        }, (v) => {
-          if (v) addJumpToBottomButton();
-          else removeJumpToBottomButton();
-        });
+        bindCheckboxSetting(
+          enableJumpToBottomButtonInput,
+          "enableJumpToBottomButton",
+          () => enableJumpToBottomButton,
+          (v) => {
+            enableJumpToBottomButton = v;
+          },
+          (v) => {
+            if (v) addJumpToBottomButton();
+            else removeJumpToBottomButton();
+          },
+        );
 
         const ver = getInstalledVersion() || "unknown";
 
@@ -2585,7 +3002,9 @@
         addLine(`Version ${ver}`);
         addLine("thank you to all users of flashii <3");
 
-        createButtonRow(aboutBody, "View Project on Patchii", () => W.open(PATCHII_PAGE_URL, "_blank", "noopener,noreferrer"));
+        createButtonRow(aboutBody, "View Project on Patchii", () =>
+          W.open(PATCHII_PAGE_URL, "_blank", "noopener,noreferrer"),
+        );
 
         createButtonRow(aboutBody, "Check for updates", () => {
           runManualUpdateCheck(ui);
@@ -2594,7 +3013,9 @@
         const updateStatusEl = addLine("");
         updateStatusEl.id = "ultreme-about-update-status";
 
-        const updateNowRow = createButtonRow(aboutBody, "Update now", () => W.open(PATCHII_USERJS_URL, "_blank", "noopener,noreferrer"));
+        const updateNowRow = createButtonRow(aboutBody, "Update now", () =>
+          W.open(PATCHII_USERJS_URL, "_blank", "noopener,noreferrer"),
+        );
         updateNowRow.wrap.style.display = "none";
 
         const ui = {
@@ -2625,15 +3046,44 @@
       const messageData = extractMessageData(msg);
       if (!messageData) return;
 
-      const { id, name, color: userColor, created: dataCreated, authorId, avatarVersion, msg: msgText } = messageData;
+      const {
+        id,
+        name,
+        color: userColor,
+        created: dataCreated,
+        authorId,
+        avatarVersion,
+        msg: msgText,
+      } = messageData;
       const author = msg.dataset.author;
       const bodyText = msg.dataset.body || "";
 
-      if (["has disconnected", "has joined"].some((p) => bodyText.includes(p))) return;
-
-      const textEl = msg.querySelector(".message__text") || msg.querySelector(".message-tiny-text");
-      const timeEl = msg.querySelector(".message__time");
+      const textEl =
+        msg.querySelector(".message__text") ||
+        msg.querySelector(".message-tiny-text");
       if (!textEl) return;
+
+      const msgTextContent = textEl.textContent.trim();
+      let sysType = null;
+      if (
+        bodyText.includes("has joined") ||
+        msgTextContent.includes("has joined")
+      )
+        sysType = "join";
+      else if (
+        bodyText.includes("has disconnected") ||
+        msgTextContent.includes("has disconnected")
+      )
+        sysType = "leave";
+
+      if (sysType && author) {
+        if (enableKonkira) applyKonkira(msg, author, sysType);
+        return;
+      } else if (enableKonkira && author) {
+        konkiraStates.delete(author);
+      }
+
+      const timeEl = msg.querySelector(".message__time");
 
       if (timeEl) {
         timeEl.onclick = (e) => {
@@ -2643,7 +3093,15 @@
           }
           clearSelectedMessage();
           msg.classList.add("selected-quote");
-          applyQuote({ name, color: userColor, created: dataCreated, id, authorId, avatarVersion, msg: msgText });
+          applyQuote({
+            name,
+            color: userColor,
+            created: dataCreated,
+            id,
+            authorId,
+            avatarVersion,
+            msg: msgText,
+          });
         };
       }
 
@@ -2685,9 +3143,19 @@
             clearSelectedMessage();
             msg.classList.add("selected-quote");
             const quoteData =
-              selectedQuoteData && selectedQuoteData.id === id && selectedQuoteData.msg
+              selectedQuoteData &&
+              selectedQuoteData.id === id &&
+              selectedQuoteData.msg
                 ? { ...selectedQuoteData }
-                : { name, color: userColor, created: dataCreated, id, authorId, avatarVersion, msg: msgText };
+                : {
+                    name,
+                    color: userColor,
+                    created: dataCreated,
+                    id,
+                    authorId,
+                    avatarVersion,
+                    msg: msgText,
+                  };
             applyQuote(quoteData);
           },
         });
@@ -2715,10 +3183,18 @@
       if (!container) return;
 
       const children = [...container.children];
+      const unhandled = [];
+
       for (let i = children.length - 1; i >= 0; i--) {
         const msg = children[i];
         if (!msg.classList.contains("message")) continue;
         if (processedMessages.has(msg)) break;
+        // Prepend to array to ensure older unhandled messages are processed first
+        unhandled.unshift(msg);
+      }
+
+      // Process chronologically so states calculate in correct order
+      for (const msg of unhandled) {
         processMessage(msg);
       }
     };
@@ -2738,7 +3214,10 @@
     }
 
     const container = getMessagesContainer();
-    if (container) new MutationObserver(processNewMessages).observe(container, { childList: true });
+    if (container)
+      new MutationObserver(processNewMessages).observe(container, {
+        childList: true,
+      });
 
     const form = document.querySelector("form.input");
     const input = document.querySelector("textarea.input__text");
@@ -2751,7 +3230,8 @@
         () => {
           if (!pendingQuote) return;
 
-          const { name, color, id, authorId, avatarVersion, msg, created } = pendingQuote;
+          const { name, color, id, authorId, avatarVersion, msg, created } =
+            pendingQuote;
           const hidden = "\u200C";
           const cleanMsg = cleanMessage(msg);
           const time = getRelativeTime(created);
@@ -2784,7 +3264,8 @@
         return;
       }
 
-      if (!(e.ctrlKey && (e.key === "ArrowUp" || e.key === "ArrowDown"))) return;
+      if (!(e.ctrlKey && (e.key === "ArrowUp" || e.key === "ArrowDown")))
+        return;
 
       e.preventDefault();
       const messages = getVisibleMessages();
@@ -2792,10 +3273,12 @@
 
       if (e.key === "ArrowUp") {
         if (selectedMessageIndex === -1) selectMessage(messages.length - 1);
-        else if (selectedMessageIndex > 0) selectMessage(selectedMessageIndex - 1);
+        else if (selectedMessageIndex > 0)
+          selectMessage(selectedMessageIndex - 1);
       } else {
         if (selectedMessageIndex === -1) return;
-        if (selectedMessageIndex < messages.length - 1) selectMessage(selectedMessageIndex + 1);
+        if (selectedMessageIndex < messages.length - 1)
+          selectMessage(selectedMessageIndex + 1);
         else selectMessage(-1);
       }
     });
